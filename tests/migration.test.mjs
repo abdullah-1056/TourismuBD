@@ -66,6 +66,8 @@ const dhakaDivisionCoordinatesSql = readFileSync(new URL("../supabase/migrations
 const chattogramDivisionCoordinatesSql = readFileSync(new URL("../supabase/migrations/065_chattogram_division_place_coordinates.sql", import.meta.url), "utf8");
 const rajshahiDivisionCoordinatesSql = readFileSync(new URL("../supabase/migrations/066_rajshahi_division_place_coordinates.sql", import.meta.url), "utf8");
 const barishalDivisionCoordinatesSql = readFileSync(new URL("../supabase/migrations/067_barishal_division_place_coordinates.sql", import.meta.url), "utf8");
+const lakeCategoriesSql = readFileSync(new URL("../supabase/migrations/076_lake_place_categories.sql", import.meta.url), "utf8");
+const businessAdminServiceRoleSql = readFileSync(new URL("../supabase/migrations/082_business_admin_service_role.sql", import.meta.url), "utf8");
 
 assert.match(sql, /new\.document_path is distinct from old\.document_path/);
 assert.doesNotMatch(sql, /create policy verification_files_owner_(read|update|delete)/);
@@ -306,6 +308,12 @@ assert.match(socialPostEngagementSql, /author_id = auth\.uid\(\)/);
 assert.match(socialPostEngagementSql, /create or replace view public\.social_post_engagement/);
 assert.match(socialPostEngagementCleanupSql, /alter table public\.social_post_likes[\s\S]*references public\.social_posts\(id\) on delete cascade/);
 assert.match(socialPostEngagementCleanupSql, /alter table public\.social_post_comments[\s\S]*references public\.social_posts\(id\) on delete cascade/);
+assert.match(chattogramDivisionSql, /when p\.name ilike '%Lake%' then 'Lake'/);
+assert.match(lakeCategoriesSql, /update public\.places/);
+assert.match(lakeCategoriesSql, /name ilike '%Lake%'/);
+assert.match(lakeCategoriesSql, /category = 'Lake'/);
+assert.match(businessAdminServiceRoleSql, /if auth\.uid\(\) is null or public\.is_super_admin\(\) then/);
+assert.match(businessAdminServiceRoleSql, /revoke execute on function public\.protect_business_admin_fields\(\) from public, anon, authenticated/);
 assert.match(profileDistrictSql, /district text/);
 for (const table of ["water_bodies", "saved_trips", "guide_profiles"]) {
   assert.match(adminSafetySql, new RegExp(`create trigger audit_${table}`));

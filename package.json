@@ -4,8 +4,9 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "dev:admin": "vite --config vite.admin.config.js",
+    "dev": "node scripts/vite-dev.mjs main",
+    "dev:admin": "node scripts/vite-dev.mjs admin",
+    "recover:super-admin": "node scripts/recover-super-admin.mjs",
     "build": "vite build",
     "build:admin": "vite build --config vite.admin.config.js",
     "build:all": "npm run build && npm run build:admin",

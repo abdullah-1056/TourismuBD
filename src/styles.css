@@ -344,6 +344,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .public-person-avatar:is(button) { padding: 0; border: 0; cursor: zoom-in; }
 .public-person-avatar svg { width: 32px; height: 32px; }
 .public-person-head h1 { margin: 2px 0 0; }
+.public-person-owner { margin: 5px 0 0; color: var(--muted); font-size: 14px; }
+.public-person-service-name, .provider-owner-name { margin: 5px 0 0; color: var(--river); font-size: 14px; font-weight: 700; }
 .public-person-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
 .message-center { position: fixed; z-index: 100; right: 20px; bottom: 20px; display: flex; width: min(420px, calc(100vw - 40px)); height: min(620px, calc(100vh - 40px)); flex-direction: column; overflow: hidden; padding: 20px; color: var(--ink); background: var(--white); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 20px 70px rgb(0 0 0 / 28%); }
 .message-center-head { display: flex; align-items: start; justify-content: space-between; gap: 14px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
@@ -387,6 +389,22 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .create-post-button { min-height: 36px; padding-block: 7px; }
 .post-composer-modal { position: relative; width: min(795px, 100%); min-height: min(560px, calc(100vh - 40px)); max-height: calc(100vh - 40px); overflow: auto; padding: 30px; background: var(--white); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 20px 70px rgb(0 0 0 / 28%); }
 .post-composer-modal .close { position: absolute; top: 15px; right: 15px; }
+.post-report-modal { position: relative; display: grid; width: min(520px, 100%); gap: 14px; padding: 28px; background: var(--white); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 20px 70px rgb(0 0 0 / 28%); }
+.post-report-modal .close { position: absolute; top: 14px; right: 14px; }
+.post-report-modal h2 { margin: 0; padding-right: 34px; font-size: 24px; }
+.post-report-modal > p:not(.eyebrow) { margin: -5px 0 3px; color: var(--muted); font-size: 13px; line-height: 1.55; }
+.post-report-modal label { display: grid; gap: 7px; color: var(--ink); font-size: 13px; font-weight: 700; }
+.post-report-reasons { min-width: 0; margin: 0; padding: 0; border: 0; }
+.post-report-reasons legend { margin-bottom: 8px; color: var(--ink); font-size: 13px; font-weight: 700; }
+.post-report-reasons > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px 12px; max-height: 216px; padding: 2px; overflow: auto; }
+.post-report-reasons label { display: flex; align-items: flex-start; gap: 7px; font-weight: 500; line-height: 1.35; cursor: pointer; }
+.post-report-reasons input { flex: 0 0 auto; width: 15px; height: 15px; margin: 1px 0 0; accent-color: var(--teal); }
+.post-report-modal textarea { box-sizing: border-box; width: 100%; min-height: 128px; padding: 11px; color: var(--ink); background: var(--paper); border: 1px solid var(--line); border-radius: 6px; font: inherit; line-height: 1.5; resize: vertical; }
+.post-report-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.post-report-requirements { margin: -4px 0 0; color: var(--muted); font-size: 12px; }
+.post-report-actions .button:disabled { opacity: .52; cursor: not-allowed; }
+.post-report-modal small { color: var(--muted); font-size: 11px; }
+@media (max-width: 560px) { .post-report-reasons > div { grid-template-columns: 1fr; } }
 .post-composer { display: grid; gap: 16px; margin: 0; padding-right: 28px; }
 .post-composer h2 { margin: 4px 0 0; font-size: 24px; }
 .post-product-field { display: grid; gap: 7px; color: var(--ink); font-size: 13px; font-weight: 700; }
@@ -757,4 +775,33 @@ footer > div > span { grid-column: 2; color: rgb(255 255 255 / 42%); font-size: 
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}
+/* Shown only if a public-app render error occurs, replacing a blank page. */
+.app-recovery {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+  background: #f5f7f4;
+  color: #10211e;
+}
+
+.app-recovery > div {
+  width: min(100%, 520px);
+  padding: 32px;
+  border: 1px solid #d6ded9;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.app-recovery h1 { margin: 8px 0 12px; }
+.app-recovery p { line-height: 1.5; }
+.app-recovery button {
+  margin-top: 12px;
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 6px;
+  background: #087f73;
+  color: #fff;
+  cursor: pointer;
 }

@@ -1,0 +1,41 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Start TourismuBD public",
+      "type": "npm",
+      "script": "dev",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "vite",
+        "pattern": [{ "regexp": ".", "file": 1, "location": 2, "message": 3 }],
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "starting server",
+          "endsPattern": "Local:"
+        }
+      }
+    },
+    {
+      "label": "Start TourismuBD Admin",
+      "type": "npm",
+      "script": "dev:admin",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "vite",
+        "pattern": [{ "regexp": ".", "file": 1, "location": 2, "message": 3 }],
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "starting server",
+          "endsPattern": "Local:"
+        }
+      }
+    },
+    {
+      "label": "Start TourismuBD",
+      "dependsOrder": "parallel",
+      "dependsOn": ["Start TourismuBD public", "Start TourismuBD Admin"],
+      "problemMatcher": []
+    }
+  ]
+}

@@ -4,7 +4,8 @@ import { BARISHAL_PLACE_COORDINATES, BARISHAL_PLACE_IDS, BARISHAL_PLACE_NOTES, B
 import { KHULNA_PLACE_COORDINATES, KHULNA_PLACE_IDS, KHULNA_PLACE_NOTES, KHULNA_ROAD_ACCESS_COORDINATES } from "./khulna-coordinates.js";
 import { kishoreganjPlaceDetails } from "./kishoreganj-access.js";
 
-const imagePath = (name) => `${import.meta.env.BASE_URL}images/${name}`;
+const imageBasePath = import.meta.env?.BASE_URL || "/";
+const imagePath = (name) => `${imageBasePath}images/${name}`;
 export const FALLBACK_IMAGE = imagePath("sylhet-waterway.png");
 
 export const districts = [
@@ -370,7 +371,7 @@ const chattogramDivisionPlaces = [
   ["noakhali", "Noakhali", 22.82, 91.1, "Nijhum Dwip|Nijhum Dwip National Park|Hatiya Island|Musapur Closure|Bajra Shahi Mosque|Gandhi Ashram|Birshreshtha Ruhul Amin Memorial Museum|Meghna estuary"],
 ].flatMap(([districtId, district, lat, lng, names]) => names.split("|").map((name) => place({
   districtId, district, name, slug: name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""), area: district,
-  category: /Beach|Sea|Island|Dwip|coastal|estuary/.test(name) ? "Coast and nature" : /River|Lake|Waterfall|Waterfall|Canal|confluence|Mohona/.test(name) ? "Riverfront and waterway" : /Temple|Mosque|Vihara|Buddha/.test(name) ? "Religious and historic site" : /Cemetery|Museum|Rajbari|heritage|Ashram|Vihara|Mura/.test(name) ? "Historic site" : /Park|Hill|Cave|Trail|Pahar/.test(name) ? "Nature and landscape" : "Tourist place",
+  category: /Beach|Sea|Island|Dwip|coastal|estuary/.test(name) ? "Coast and nature" : /Lake/.test(name) ? "Lake" : /River|Waterfall|Waterfall|Canal|confluence|Mohona/.test(name) ? "Riverfront and waterway" : /Temple|Mosque|Vihara|Buddha/.test(name) ? "Religious and historic site" : /Cemetery|Museum|Rajbari|heritage|Ashram|Vihara|Mura/.test(name) ? "Historic site" : /Park|Hill|Cave|Trail|Pahar/.test(name) ? "Nature and landscape" : "Tourist place",
   aliases: [], shortDescription: `${name} is a listed visitor destination in ${district}.`, bestTime: { recommended: "November to March", why: "Drier weather is generally more comfortable for local travel.", caution: "Confirm access and local conditions before travel.", lastVerified: null }, howToReach: `Travel from ${district} town using available local transport and confirm the final approach locally.`, practicalTip: "Check current access, weather, and opening information before visiting.", coordinates: { lat, lng },
 })));
 

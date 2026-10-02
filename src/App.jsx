@@ -77,6 +77,25 @@ const NAV = [
   ["shop", "Shop", ShoppingBag],
 ];
 
+const POST_REPORT_REASONS = [
+  "Spam or scam",
+  "Harassment or bullying",
+  "Insulting or demeaning a person",
+  "Hate speech",
+  "Religious hate or disrespect",
+  "Discrimination",
+  "Violence or threats",
+  "Adult or sexually explicit content",
+  "Nudity or sexual content",
+  "Self-harm or suicide",
+  "False or misleading information",
+  "Illegal activity",
+  "Impersonation",
+  "Privacy violation",
+  "Copyright or intellectual property violation",
+  "Other inappropriate content",
+];
+
 const SERVICE_META = {
   GUIDE: { label: "Guides", providerType: "GUIDE", icon: CircleUserRound },
   HOUSEBOAT: { label: "Houseboats", providerType: "HOUSEBOAT_OWNER", icon: Sailboat },
@@ -100,6 +119,37 @@ const fallbackImage = `${import.meta.env.BASE_URL}images/sylhet-waterway.png`;
 const ADMIN_APP_URL = import.meta.env.VITE_ADMIN_APP_URL || (import.meta.env.DEV ? "http://127.0.0.1:5176" : "");
 const PROFILE_DETAILS_DEFAULTS = { profile_photo_urls: [], bio: "", district: "", blood_group: "", gender: "", present_address: "", permanent_address: "", working_place: "", hobby: "", phone_edit_count: 0, email_edit_count: 0, followers_visible: true };
 const PROFILE_DETAIL_FIELDS = [["District", "district"], ["Email", "email"], ["Phone number", "phone"], ["Blood group", "blood_group"], ["Gender", "gender"], ["Working place", "working_place"], ["Hobby", "hobby"], ["Present address", "present_address"], ["Permanent address", "permanent_address"]];
+const RESTORABLE_VIEWS = new Set(["home", "feed", "explore", "trip", "services", "people", "shop", "provider", "booking-requests", "traveler", "business", "business-catalog", "account-about", "provider-ratings"]);
+
+function viewFromLocation() {
+  const view = new URLSearchParams(window.location.search).get("view");
+  return RESTORABLE_VIEWS.has(view) ? view : "home";
+}
+
+function updateBrowserView(view, replace = false) {
+  if (!RESTORABLE_VIEWS.has(view)) return;
+  const url = new URL(window.location.href);
+  if (view === "home") url.searchParams.delete("view");
+  else url.searchParams.set("view", view);
+  window.history[replace ? "replaceState" : "pushState"]({ ...window.history.state, tourismuBDView: view }, "", url);
+}
+
+function useSessionState(key, initialValue) {
+  const [value, setValue] = useState(() => {
+    try {
+      const saved = window.sessionStorage.getItem(key);
+      return saved === null ? initialValue : JSON.parse(saved);
+    } catch {
+      return initialValue;
+    }
+  });
+
+  useEffect(() => {
+    try { window.sessionStorage.setItem(key, JSON.stringify(value)); } catch { /* Session storage can be unavailable. */ }
+  }, [key, value]);
+
+  return [value, setValue];
+}
 
 async function loadProfile(userId, extraFields = "") {
   const result = await supabase.from("profiles").select(`${PROFILE_FIELDS}${extraFields}`).eq("id", userId).maybeSingle();
@@ -190,12 +240,12 @@ function AuthDialog({ onClose, notify, onAuthenticated }) {
         <p className="eyebrow">TourismuBD account</p>
         <h2 id="auth-title">{mode === "signin" ? "Welcome back" : "Create an account"}</h2>
         <div className="segmented auth-switch"><button type="button" className={mode === "signin" ? "active" : ""} onClick={() => setMode("signin")}>Sign in</button><button type="button" className={mode === "signup" ? "active" : ""} onClick={() => setMode("signup")}>Create account</button></div>
-        {mode === "signup" ? <><label>Full name<input name="fullName" required autoComplete="name" /></label><label>Account type<select value={accountKind} onChange={(event) => setAccountKind(event.target.value)}><option value="TRAVELER">Traveler</option><option value="PROVIDER">Provider</option><option value="BUSINESS">Business</option></select></label>{accountKind === "PROVIDER" ? <><label>Provider type<select value={providerRole} onChange={(event) => setProviderRole(event.target.value)}>{PROVIDER_ROLES.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><label>Phone number<input name="phone" required type="tel" inputMode="tel" placeholder="01XXXXXXXXX" pattern="(\\+880|0)1[3-9][0-9]{8}" /></label></> : accountKind === "BUSINESS" ? <><label>Business name<input name="businessName" required minLength="2" maxLength="120" placeholder="Your shop or brand name" /></label><label>District<input name="district" placeholder="Business district" /></label><label>Phone number<input name="phone" required type="tel" inputMode="tel" placeholder="01XXXXXXXXX" pattern="(\\+880|0)1[3-9][0-9]{8}" /></label></> : <label>Phone number (optional)<input name="phone" type="tel" inputMode="tel" placeholder="01XXXXXXXXX" pattern="(\\+880|0)1[3-9][0-9]{8}" /></label>}</> : null}
+        {mode === "signup" ? <><label>Full name<input name="fullName" required autoComplete="name" /></label><label>Account type<select value={accountKind} onChange={(event) => setAccountKind(event.target.value)}><option value="TRAVELER">Traveler</option><option value="PROVIDER">Provider</option><option value="BUSINESS">Business</option></select></label>{accountKind === "PROVIDER" ? <><label>Provider type<select value={providerRole} onChange={(event) => setProviderRole(event.target.value)}>{PROVIDER_ROLES.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><label>Phone number<input name="phone" required type="tel" inputMode="tel" placeholder="01XXXXXXXXX" pattern="(\\+880|0)1[3-9][0-9]{8}" /></label></> : accountKind === "BUSINESS" ? <><label>Business name<input name="businessName" required minLength="2" maxLength="120" placeholder="Your shop or brand name" /></label><label>District<input name="district" placeholder="Business district" /></label><label>Phone number<input name="phone" required type="tel" inputMode="tel" placeholder="01XXXXXXXXX" pattern="(\\+880|0)1[3-9][0-9]{8}" /></label></> : <label>Phone number<input name="phone" required type="tel" inputMode="tel" placeholder="01XXXXXXXXX" pattern="(\\+880|0)1[3-9][0-9]{8}" /></label>}</> : null}
         <label>Email<input name="email" required type="email" autoComplete="email" /></label>
         <label>Password<input name="password" required type="password" minLength="8" autoComplete={mode === "signin" ? "current-password" : "new-password"} /></label>
         {error ? <p className="form-error" role="alert">{error}</p> : null}
         <button className="button primary wide">{mode === "signin" ? "Sign in" : "Create account"}</button>
-        {mode === "signin" || accountKind === "TRAVELER" ? <button type="button" className="button secondary wide google-button" onClick={google}>Continue with Google</button> : null}
+        {mode === "signin" ? <button type="button" className="button secondary wide google-button" onClick={google}>Continue with Google</button> : null}
       </form>
     </dialog>
   );
@@ -261,7 +311,10 @@ function ProfileDetailsForm({ user, profile, provider, notify, onSaved }) {
     const values = new FormData(event.currentTarget);
     const email = values.get("email").trim();
     const phone = values.get("phone").trim();
+    const providerName = values.get("providerName")?.trim();
+    const providerServiceName = values.get("providerServiceName")?.trim();
     if (!email || !phone) return notify("Email and phone number are required.");
+    if (provider && (!providerName || providerName.length < 2)) return notify("Add a provider name with at least two characters.");
     const emailChanged = email !== (profile.email || user.email || "");
     const phoneChanged = phone !== (profile.phone || "");
     if (emailChanged && profile.email_edit_count >= 3) return notify("Email can only be changed three times.");
@@ -270,11 +323,11 @@ function ProfileDetailsForm({ user, profile, provider, notify, onSaved }) {
       const { error: authError } = await supabase.auth.updateUser({ email });
       if (authError) return notify(authErrorMessage(authError, "update your email"));
     }
-    const payload = { email, phone, avatar_url: profile.avatar_url || null, followers_visible: values.get("followers_visible") === "on", ...Object.fromEntries(["bio", "district", "blood_group", "gender", "present_address", "permanent_address", "working_place", "hobby"].map((name) => [name, values.get(name) || null])) };
+    const payload = { email, phone, avatar_url: profile.avatar_url || null, followers_visible: values.get("followers_visible") === "on", ...(provider ? { full_name: providerName } : {}), ...Object.fromEntries(["bio", "district", "blood_group", "gender", "present_address", "permanent_address", "working_place", "hobby"].map((name) => [name, values.get(name) || null])) };
     const { data, error } = await supabase.from("profiles").update(payload).eq("id", user.id).select(PROFILE_FIELDS).single();
     if (error) return notify(error.message);
     if (provider) {
-      const { error: providerError } = await supabase.from("providers").update({ bio: payload.bio, photo_url: payload.avatar_url, contact_email: email, contact_phone: phone }).eq("user_id", user.id);
+      const { error: providerError } = await supabase.from("providers").update({ service_name: providerServiceName || null, bio: payload.bio, photo_url: payload.avatar_url, contact_email: email, contact_phone: phone }).eq("user_id", user.id);
       if (providerError) return notify(providerError.message);
     }
     onSaved(data);
@@ -283,6 +336,7 @@ function ProfileDetailsForm({ user, profile, provider, notify, onSaved }) {
 
   return <form className="profile-editor" onSubmit={save}>
     <h2>About</h2>
+    {provider ? <><label>Provider name<input name="providerName" required minLength="2" maxLength="120" defaultValue={profile.full_name || ""} placeholder="Your name or provider identity" /></label><label>Service name<input name="providerServiceName" minLength="2" maxLength="120" defaultValue={provider.service_name || ""} placeholder="Hotel, guide service, transport company, or agency" /></label></> : null}
     <label>Email<input name="email" required type="email" defaultValue={profile.email || user.email || ""} /></label>
     <label>Phone number<input name="phone" required type="tel" inputMode="tel" pattern="(\\+880|0)1[3-9][0-9]{8}" defaultValue={profile.phone || ""} placeholder="01XXXXXXXXX" /></label>
     <label className="profile-editor-wide">Bio<textarea name="bio" rows="4" defaultValue={profile.bio || ""} placeholder="Tell travelers a little about yourself." /></label>
@@ -466,6 +520,32 @@ async function addPostEngagement(posts) {
   return posts.map((post) => ({ ...post, like_count: engagement[post.id]?.like_count || 0, comment_count: engagement[post.id]?.comment_count || 0, liked_by_me: Boolean(engagement[post.id]?.liked_by_me) }));
 }
 
+function PostReportDialog({ post, onClose, onSubmit, saving }) {
+  const dialogRef = useRef(null);
+  const [details, setDetails] = useState("");
+  const [reasons, setReasons] = useState([]);
+  const objectionLength = details.trim().length;
+  useEffect(() => { dialogRef.current?.showModal(); }, []);
+  const toggleReason = (reason) => setReasons((selected) => selected.includes(reason) ? selected.filter((item) => item !== reason) : [...selected, reason]);
+  const submit = async (event) => {
+    event.preventDefault();
+    if (await onSubmit({ details, reasons })) onClose();
+  };
+  return <dialog ref={dialogRef} className="provider-dialog post-dialog" onCancel={(event) => { event.preventDefault(); onClose(); }} onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <form className="post-report-modal" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}>
+      <button type="button" className="icon-button close" onClick={onClose} aria-label="Close report form"><X /></button>
+      <p className="eyebrow">Report timeline update</p>
+      <h2>What is your objection?</h2>
+      <p>Select every reason that applies, then explain why this post should be reviewed. Your report is sent privately to TourismuBD Admin.</p>
+      <fieldset className="post-report-reasons"><legend>Report reasons</legend><div>{POST_REPORT_REASONS.map((reason) => <label key={reason}><input type="checkbox" checked={reasons.includes(reason)} onChange={() => toggleReason(reason)} />{reason}</label>)}</div></fieldset>
+      <label>Objection details<textarea value={details} onChange={(event) => setDetails(event.target.value)} minLength="10" maxLength="2000" rows="6" placeholder="Write the reason for your report..." aria-label="Objection details" required autoFocus /></label>
+      <p className="post-report-requirements">{reasons.length ? `${reasons.length} reason${reasons.length === 1 ? "" : "s"} selected.` : "Select at least one reason."} Write at least 10 characters ({Math.min(objectionLength, 10)}/10).</p>
+      <div className="post-report-actions"><button type="button" className="button secondary" onClick={onClose}>Cancel</button><button className="button primary" disabled={saving || !reasons.length || objectionLength < 10}><Flag />{saving ? "Submitting..." : "Submit report"}</button></div>
+      <small>Reporting a post by {post.author.full_name || "this member"}.</small>
+    </form>
+  </dialog>;
+}
+
 function PostCard({ post, user, notify, onUpdated, onDeleted }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -481,6 +561,8 @@ function PostCard({ post, user, notify, onUpdated, onDeleted }) {
   const [commentBody, setCommentBody] = useState("");
   const [savingReaction, setSavingReaction] = useState(false);
   const [savingComment, setSavingComment] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [savingReport, setSavingReport] = useState(false);
   const isOwner = user?.id === post.author_id;
   const locationUrl = post.location_latitude != null && post.location_longitude != null ? `https://www.google.com/maps?q=${post.location_latitude},${post.location_longitude}` : null;
   const locationText = post.location_name || "View post location";
@@ -507,11 +589,33 @@ function PostCard({ post, user, notify, onUpdated, onDeleted }) {
     onDeleted?.(post.id);
     notify("Timeline update deleted.");
   };
-  const reportPost = async () => {
-    const { error } = await supabase.from("reports").insert({ created_by: user.id, category: "OTHER", details: "Reported timeline update.", social_post_id: post.id });
-    if (error) return notify(error.code === "23505" ? "You already reported this update." : error.message);
+  const reportPost = async ({ details, reasons }) => {
+    const objection = details.trim();
+    if (!reasons.length) { notify("Select at least one reason for this report."); return false; }
+    if (objection.length < 10) { notify("Write at least 10 characters explaining your objection."); return false; }
+    setSavingReport(true);
+    const reportPayload = { created_by: user.id, category: "OTHER", reason_categories: reasons, details: objection, social_post_id: post.id };
+    const legacyPayload = { created_by: user.id, category: "OTHER", details: `Report reasons: ${reasons.join(" | ")}\n\n${objection}`, social_post_id: post.id };
+    let payload = reportPayload;
+    let { error } = await supabase.from("reports").insert(payload);
+    if (error && /reason_categories/i.test(error.message || "")) {
+      payload = legacyPayload;
+      ({ error } = await supabase.from("reports").insert(payload));
+    }
+    let updated = false;
+    if (error?.code === "23505") {
+      ({ error } = await supabase.from("reports").update(payload).eq("social_post_id", post.id).eq("created_by", user.id).eq("status", "OPEN"));
+      if (error && payload === reportPayload && /reason_categories/i.test(error.message || "")) {
+        payload = legacyPayload;
+        ({ error } = await supabase.from("reports").update(payload).eq("social_post_id", post.id).eq("created_by", user.id).eq("status", "OPEN"));
+      }
+      updated = !error;
+    }
+    setSavingReport(false);
+    if (error) { notify(error.code === "23505" ? "You already reported this update." : error.message); return false; }
     setMenuOpen(false);
-    notify("Timeline update reported.");
+    notify(updated ? "Your existing report was updated." : "Timeline update reported.");
+    return true;
   };
 
   const toggleLike = async () => {
@@ -571,14 +675,14 @@ function PostCard({ post, user, notify, onUpdated, onDeleted }) {
     }
   };
 
-  return <article className="community-post">
-    <div className="post-card-head"><div className="post-author"><span>{post.author.avatar_url ? <img src={post.author.avatar_url} alt="" /> : <CircleUserRound />}</span><div><b>{post.author.full_name || "TourismuBD member"}</b><small>{PROVIDER_TYPE_LABELS[post.author.role] || "Traveler"} · {new Date(post.created_at).toLocaleDateString()}</small></div></div>{user ? <div className="post-menu"><button type="button" className="icon-button" onClick={() => setMenuOpen((open) => !open)} aria-label="Timeline options" aria-expanded={menuOpen}><MoreHorizontal /></button>{menuOpen ? <div className="post-menu-popover" role="menu">{isOwner ? <><button type="button" onClick={() => { setEditing(true); setMenuOpen(false); }}><Pencil />Edit</button><button type="button" className="danger" onClick={deletePost}><Trash2 />Delete</button></> : <button type="button" onClick={reportPost}><Flag />Report</button>}</div> : null}</div> : null}</div>
+  return <><article className="community-post">
+    <div className="post-card-head"><div className="post-author"><span>{post.author.avatar_url ? <img src={post.author.avatar_url} alt="" /> : <CircleUserRound />}</span><div><b>{post.author.full_name || "TourismuBD member"}</b><small>{PROVIDER_TYPE_LABELS[post.author.role] || "Traveler"} · {new Date(post.created_at).toLocaleDateString()}</small></div></div>{user ? <div className="post-menu"><button type="button" className="icon-button" onClick={() => setMenuOpen((open) => !open)} aria-label="Timeline options" aria-expanded={menuOpen}><MoreHorizontal /></button>{menuOpen ? <div className="post-menu-popover" role="menu">{isOwner ? <><button type="button" onClick={() => { setEditing(true); setMenuOpen(false); }}><Pencil />Edit</button><button type="button" className="danger" onClick={deletePost}><Trash2 />Delete</button></> : <button type="button" onClick={() => { setMenuOpen(false); setReportOpen(true); }}><Flag />Report</button>}</div> : null}</div> : null}</div>
     {editing ? <form className="post-edit" onSubmit={saveEdit}>{post.product_name ? <label className="post-product-field">Product name<input value={productName} onChange={(event) => setProductName(event.target.value)} required minLength="2" maxLength="140" /></label> : null}<textarea value={body} onChange={(event) => setBody(event.target.value)} maxLength="2000" /><div><button type="button" className="button secondary" onClick={() => { setBody(post.body); setProductName(post.product_name || ""); setEditing(false); }}>Cancel</button><button className="button primary">Save</button></div></form> : <>{post.product_name ? <h3 className="post-product-title">{post.product_name}</h3> : null}<p>{post.body}</p></>}
     {locationUrl ? <a className="post-location" href={locationUrl} target="_blank" rel="noreferrer"><MapPin />{locationText}</a> : post.location_name ? <span className="post-location"><MapPin />{locationText}</span> : null}
     {post.media_type === "VIDEO" ? <video controls preload="metadata" src={post.media_url} /> : <img src={post.media_url} alt="Post attachment" />}
     <div className="post-actions"><button type="button" className={liked ? "active" : ""} onClick={toggleLike} disabled={savingReaction} aria-label={liked ? "Unlike post" : "Like post"} aria-pressed={liked} title={liked ? "Unlike" : "Like"}><Heart />{likeCount ? <span>{likeCount}</span> : null}</button><button type="button" onClick={toggleComments} aria-label="Comments" aria-expanded={commentsOpen} title="Comments"><MessageCircle />{commentCount ? <span>{commentCount}</span> : null}</button><button type="button" onClick={sharePost} aria-label="Share post" title="Share"><Share2 /></button></div>
     {commentsOpen ? <section className="post-comments" aria-label="Post comments">{commentsLoading ? <p className="people-note">Loading comments...</p> : null}{!commentsLoading && !comments.length ? <p className="people-note">No comments yet.</p> : null}<div className="post-comment-list">{comments.map((comment) => <article className="post-comment" key={comment.id}><span>{comment.author?.avatar_url ? <img src={comment.author.avatar_url} alt="" /> : <CircleUserRound />}</span><div><b>{comment.author?.full_name || "TourismuBD member"}</b><small>{new Date(comment.created_at).toLocaleString(undefined, { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}</small><p>{comment.body}</p></div></article>)}</div><form className="post-comment-form" onSubmit={addComment}><textarea value={commentBody} onChange={(event) => setCommentBody(event.target.value)} maxLength="1000" rows="2" placeholder="Write a comment" aria-label="Write a comment" /><button className="button primary" disabled={!commentBody.trim() || savingComment}><Send />{savingComment ? "Posting" : "Post"}</button></form></section> : null}
-  </article>;
+  </article>{reportOpen ? <PostReportDialog post={post} saving={savingReport} onClose={() => setReportOpen(false)} onSubmit={reportPost} /> : null}</>;
 }
 
 function DashboardPosts({ user, authorId = user?.id, profile, provider, refreshKey, title = "My timeline", notify }) {
@@ -889,7 +993,7 @@ function ProviderDashboard({ user, notify }) {
     let active = true;
     Promise.all([
       loadProfile(user.id, ",role,status"),
-      supabase.from("providers").select("id,type,display_name,contact_email,contact_phone,bio").eq("user_id", user.id).maybeSingle(),
+      supabase.from("providers").select("id,type,display_name,service_name,contact_email,contact_phone,bio").eq("user_id", user.id).maybeSingle(),
       supabase.from("public_provider_details").select("rating_average,rating_count").eq("user_id", user.id).maybeSingle(),
     ]).then(([profileResult, providerResult, ratingResult]) => {
       if (!active) return;
@@ -903,9 +1007,10 @@ function ProviderDashboard({ user, notify }) {
 
   const { profile, provider, rating } = state;
   return <main className="page-shell page-top provider-dashboard">
-    <div className="page-title dashboard-title"><ProfileAvatar user={user} profile={profile || {}} provider={provider} notify={notify} onSaved={(nextProfile) => setState((current) => ({ ...current, profile: nextProfile }))} /><div><p className="eyebrow">Hello,</p><h1 className="dashboard-greeting">{provider?.display_name || profile?.full_name || "provider"}</h1><ProviderRating profile={rating || {}} /><ProfileBio profile={{ ...profile, bio: profile?.bio || provider?.bio }} fallback="Add your bio below." /><DashboardFollowerCount userId={user.id} /></div><div className="dashboard-post-action"><PostPublisher user={user} notify={notify} onPublished={() => setPostVersion((version) => version + 1)} /></div></div>
+    <div className="page-title dashboard-title"><ProfileAvatar user={user} profile={profile || {}} provider={provider} notify={notify} onSaved={(nextProfile) => setState((current) => ({ ...current, profile: nextProfile }))} /><div><p className="eyebrow">Hello,</p><h1 className="dashboard-greeting">{profile?.full_name || provider?.display_name || "provider"}</h1><ProviderRating profile={rating || {}} /><ProfileBio profile={{ ...profile, bio: profile?.bio || provider?.bio }} fallback="Add your bio below." /><DashboardFollowerCount userId={user.id} /></div><div className="dashboard-post-action"><PostPublisher user={user} notify={notify} onPublished={() => setPostVersion((version) => version + 1)} /></div></div>
     {provider ? <section className="provider-dashboard-panel" aria-label="Provider account details">
       <div><span>Provider type</span><b>{PROVIDER_TYPE_LABELS[profile?.role] || provider.type}</b></div>
+      <div><span>Service name</span><b>{provider.service_name || "Not added"}</b></div>
     </section> : <p className="form-error">Your provider setup is incomplete. Run the provider migration once, then reopen this page.</p>}
     {profile ? <ProfilePhotoGallery user={user} profile={profile} provider={provider} notify={notify} onSaved={(nextProfile) => setState((current) => ({ ...current, profile: nextProfile }))} /> : null}
     {profile ? <DashboardPosts user={user} profile={profile} provider={provider} refreshKey={postVersion} notify={notify} /> : null}
@@ -1178,9 +1283,8 @@ function BusinessCatalogPage({ user, notify, onBack }) {
   </main>;
 }
 
-function Marketplace() {
+function Marketplace({ query, setQuery }) {
   const [state, setState] = useState({ loading: true, products: [], error: "", postError: "" });
-  const [query, setQuery] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -1239,7 +1343,7 @@ function AccountAboutPage({ user, notify, onBack }) {
     let active = true;
     Promise.all([
       loadProfile(user.id),
-      supabase.from("providers").select("id").eq("user_id", user.id).maybeSingle(),
+      supabase.from("providers").select("id,type,display_name,service_name").eq("user_id", user.id).maybeSingle(),
     ]).then(([profileResult, providerResult]) => {
       if (active) setState({ loading: false, profile: profileResult.data || fallbackProfile, provider: providerResult.data, error: profileResult.error?.message || providerResult.error?.message || "" });
     });
@@ -1431,12 +1535,37 @@ function PublicPersonProfile({ person, onBack, backLabel = "Back to people", use
   const [photoOpen, setPhotoOpen] = useState(false);
   const [photoIndex, setPhotoIndex] = useState(0);
   const [messageOpen, setMessageOpen] = useState(false);
+  const isBusiness = person.role === "BUSINESS_OWNER";
+  const isProvider = PROVIDER_ROLES.some(([role]) => role === person.role);
+  const [businessName, setBusinessName] = useState(person.business_name || "");
+  const [serviceName, setServiceName] = useState(person.service_name || "");
   const role = PROVIDER_TYPE_LABELS[person.role] || "Traveler";
   const photos = (person.profile_photo_urls || []).filter(Boolean);
   const contactDetails = PROFILE_DETAIL_FIELDS.slice(0, 2).map(([label, field]) => [label, person[field] || "Not added"]);
   const details = PROFILE_DETAIL_FIELDS.slice(2).map(([label, field]) => [label, person[field]]).filter(([, value]) => value);
   const avatarUrl = photos[photoIndex] || person.avatar_url;
-  const photoAlt = `${person.full_name || "Account"} profile`;
+  const profileName = isBusiness && businessName ? businessName : person.full_name || "TourismuBD member";
+  const photoAlt = `${profileName} profile`;
+
+  useEffect(() => {
+    setBusinessName(person.business_name || "");
+    if (!isBusiness || person.business_name || !supabase) return undefined;
+    let active = true;
+    supabase.from("businesses").select("business_name").eq("user_id", person.id).maybeSingle().then(({ data }) => {
+      if (active && data?.business_name) setBusinessName(data.business_name);
+    });
+    return () => { active = false; };
+  }, [isBusiness, person.business_name, person.id]);
+
+  useEffect(() => {
+    setServiceName(person.service_name || "");
+    if (!isProvider || person.service_name || !supabase) return undefined;
+    let active = true;
+    supabase.from("public_provider_details").select("service_name").eq("user_id", person.id).maybeSingle().then(({ data }) => {
+      if (active && data?.service_name) setServiceName(data.service_name);
+    });
+    return () => { active = false; };
+  }, [isProvider, person.service_name, person.id]);
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -1454,7 +1583,7 @@ function PublicPersonProfile({ person, onBack, backLabel = "Back to people", use
   return <main className="page-shell page-top public-person-page">
     <button type="button" className="back-button" onClick={onBack}><ArrowLeft /> {backLabel}</button>
     <section className="public-person-profile" aria-labelledby="public-person-title">
-      <div className="public-person-head">{avatarUrl ? <button type="button" className="public-person-avatar" onClick={() => setPhotoOpen(true)} aria-label="View profile picture"><img src={avatarUrl} alt={photoAlt} /></button> : <span className="public-person-avatar"><CircleUserRound /></span>}<div><p className="eyebrow">{role}</p><h1 id="public-person-title">{person.full_name || "TourismuBD member"}</h1><ProviderRating profile={person} isProvider={person.role !== "TRAVELER"} /></div>{readOnly ? null : <div className="public-person-actions">{user?.id !== person.id ? <button type="button" className="button secondary" onClick={() => user ? setMessageOpen(true) : notify("Sign in to send a message.")}><MessageSquare />Message</button> : null}<FollowButton user={user} profileId={person.id} notify={notify} onChanged={onFollowerChange} /></div>}</div>
+      <div className="public-person-head">{avatarUrl ? <button type="button" className="public-person-avatar" onClick={() => setPhotoOpen(true)} aria-label="View profile picture"><img src={avatarUrl} alt={photoAlt} /></button> : <span className="public-person-avatar"><CircleUserRound /></span>}<div><p className="eyebrow">{role}</p><h1 id="public-person-title">{profileName}</h1>{isBusiness && person.full_name ? <p className="public-person-owner">Business owner: {person.full_name}</p> : null}{isProvider && serviceName ? <p className="public-person-service-name">Service: {serviceName}</p> : null}<ProviderRating profile={person} isProvider={person.role !== "TRAVELER"} /></div>{readOnly ? null : <div className="public-person-actions">{user?.id !== person.id ? <button type="button" className="button secondary" onClick={() => user ? setMessageOpen(true) : notify("Sign in to send a message.")}><MessageSquare />Message</button> : null}<FollowButton user={user} profileId={person.id} notify={notify} onChanged={onFollowerChange} /></div>}</div>
       <p className="public-person-bio">{person.bio || "No bio added yet."}</p>
       {person.followers_visible !== false || user?.id === person.id ? <FollowerCount count={person.follower_count || 0} /> : null}
       <dl className="public-person-contact">{contactDetails.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
@@ -1466,8 +1595,7 @@ function PublicPersonProfile({ person, onBack, backLabel = "Back to people", use
   </main>;
 }
 
-function PeopleDirectory({ notify, user }) {
-  const [query, setQuery] = useState("");
+function PeopleDirectory({ notify, user, query, setQuery }) {
   const [people, setPeople] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedPerson, setSelectedPerson] = useState(null);
@@ -1478,10 +1606,11 @@ function PeopleDirectory({ notify, user }) {
     if (!supabase) return notify("Connect Supabase to search people.");
     let active = true;
     setLoading(true);
-    supabase.from("public_people").select(PUBLIC_PERSON_FIELDS).ilike("full_name", `%${deferredQuery.replace(/[%,_]/g, "")}%`).order("full_name").limit(30).then(({ data, error }) => {
+    const searchTerm = deferredQuery.replace(/[%,_]/g, "");
+    supabase.rpc("search_public_people", { search_query: searchTerm }).then(({ data, error }) => {
       if (!active) return;
       setLoading(false);
-      if (error) return notify(error.message);
+      if (error) return notify(/search_public_people|function .* does not exist|schema cache/i.test(error.message) ? "Run Supabase migration 104_public_people_provider_name_search.sql to enable provider name search." : error.message);
       setPeople(data || []);
     });
     return () => { active = false; };
@@ -1681,10 +1810,8 @@ function Home({ setView, openServices, openPlace, selectedIds, togglePlace }) {
   );
 }
 
-function Explore({ selectedIds, togglePlace, openPlace }) {
-  const [query, setQuery] = useState("");
-  const [category, setCategory] = useState("All");
-  const [categoriesExpanded, setCategoriesExpanded] = useState(false);
+function Explore({ selectedIds, togglePlace, openPlace, filters, setFilters }) {
+  const { query, category, categoriesExpanded } = filters;
   const deferredQuery = useDeferredValue(query);
   const matchingPlaces = useMemo(() => places.filter((place) => {
     const haystack = `${place.name} ${place.area} ${place.category} ${place.district} ${(place.aliases || []).join(" ")}`.toLowerCase();
@@ -1694,18 +1821,18 @@ function Explore({ selectedIds, togglePlace, openPlace }) {
   const filtered = matchingPlaces.filter((place) => category === "All" || place.category === category);
 
   useEffect(() => {
-    if (!categories.includes(category)) setCategory("All");
-  }, [category, categories.join("|")]);
+    if (!categories.includes(category)) setFilters((current) => ({ ...current, category: "All" }));
+  }, [category, categories.join("|"), setFilters]);
 
   return (
     <main className="page-shell page-top">
       <div className="page-title"><p className="eyebrow">Bangladesh destinations</p><h1>Find your next place.</h1><p>Published destinations with practical travel notes and clear verification status.</p></div>
       <div className="explore-tools">
-        <label className="inline-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search by place, area, or category" /><span>{filtered.length} places</span></label>
+        <label className="inline-search"><Search /><input value={query} onChange={(event) => setFilters((current) => ({ ...current, query: event.target.value }))} placeholder="Search by place, area, or category" /><span>{filtered.length} places</span></label>
         <div className={`category-tabs ${categoriesExpanded ? "expanded" : "collapsed"}`} role="group" aria-label="Filter places">
-          {categories.map((item) => <button className={category === item ? "active" : ""} onClick={() => setCategory(item)} key={item}>{item}</button>)}
+          {categories.map((item) => <button className={category === item ? "active" : ""} onClick={() => setFilters((current) => ({ ...current, category: item }))} key={item}>{item}</button>)}
         </div>
-        {categories.length > 8 ? <button type="button" className="category-more" onClick={() => setCategoriesExpanded((expanded) => !expanded)}>{categoriesExpanded ? "See less" : "See more"}</button> : null}
+        {categories.length > 8 ? <button type="button" className="category-more" onClick={() => setFilters((current) => ({ ...current, categoriesExpanded: !current.categoriesExpanded }))}>{categoriesExpanded ? "See less" : "See more"}</button> : null}
       </div>
       <div className="place-grid explore-grid">
         {filtered.map((place) => <PlaceCard key={place.id} place={place} selected={selectedIds.includes(place.id)} onOpen={openPlace} onToggle={togglePlace} />)}
@@ -2017,10 +2144,14 @@ function RouteDayMap({ plan, start }) {
   </article>;
 }
 
-function TripPlanner({ user, selectedIds, setSelectedIds, notify, onDistrictSelected }) {
-  const [districtId, setDistrictId] = useState(() => places.find((place) => selectedIds.some((id) => place.id === id || place.databaseId === id))?.districtId || "");
-  const [start, setStart] = useState("city-center");
-  const [days, setDays] = useState(2);
+function TripPlanner({ user, selectedIds, setSelectedIds, notify, onDistrictSelected, settings, setSettings }) {
+  const inferredDistrictId = places.find((place) => selectedIds.some((id) => place.id === id || place.databaseId === id))?.districtId || "";
+  const districtId = settings.districtId || inferredDistrictId;
+  const { start, days } = settings;
+  const updateSettings = (changes) => setSettings((current) => ({ ...current, ...changes }));
+  const setDistrictId = (nextDistrictId) => updateSettings({ districtId: nextDistrictId, start: "town-center" });
+  const setStart = (nextStart) => updateSettings({ start: nextStart });
+  const setDays = (nextDays) => updateSettings({ days: typeof nextDays === "function" ? nextDays(days) : nextDays });
   const [routeResult, setRouteResult] = useState(null);
   const [saved, setSaved] = useState(() => loadSavedTrips(user?.id));
   const district = districts.find((item) => item.id === districtId);
@@ -2053,8 +2184,12 @@ function TripPlanner({ user, selectedIds, setSelectedIds, notify, onDistrictSele
   const startingPoint = startOptions.find((option) => option.value === start) || startOptions[0];
 
   useEffect(() => setRouteResult(null), [districtId, selectedIds, start, days]);
-  useEffect(() => setDays((value) => Math.min(value, tripDayLimit)), [tripDayLimit]);
-  useEffect(() => setStart("town-center"), [districtId]);
+  useEffect(() => {
+    if (!settings.districtId && inferredDistrictId) updateSettings({ districtId: inferredDistrictId });
+  }, [inferredDistrictId, settings.districtId]);
+  useEffect(() => {
+    if (days > tripDayLimit) setDays(tripDayLimit);
+  }, [days, tripDayLimit]);
   useEffect(() => onDistrictSelected(district || null), [districtId, district, onDistrictSelected]);
   useEffect(() => setSaved(loadSavedTrips(user?.id)), [user?.id]);
   useEffect(() => {
@@ -2155,7 +2290,7 @@ function BookingDialog({ listing, serviceType, onClose, onSubmit }) {
       <form className="modal" onSubmit={onSubmit} onMouseDown={(event) => event.stopPropagation()} aria-labelledby="booking-title">
         <button type="button" className="icon-button close" onClick={onClose} aria-label="Close"><X /></button>
         <p className="eyebrow">Booking request</p>
-        <h2 id="booking-title">Request {listing.display_name || listing.name}</h2>
+        <h2 id="booking-title">Request {listing.service_name || listing.display_name || listing.name}</h2>
         <label>Start date<input name="startDate" required type="date" min={new Date().toISOString().slice(0, 10)} /></label>
         <label>Number of days<input name="durationDays" required type="number" min="1" max="30" defaultValue="1" readOnly={fixedOneDay} /></label>
         {fixedOneDay ? <p className="form-note">Sundarbans Small Boat bookings are fixed to one day.</p> : null}
@@ -2168,8 +2303,7 @@ function BookingDialog({ listing, serviceType, onClose, onSubmit }) {
   );
 }
 
-function Services({ notify, initialType, user, onAuth, district }) {
-  const [type, setType] = useState(initialType);
+function Services({ notify, type, onTypeChange, user, onAuth, district }) {
   const [liveListings, setLiveListings] = useState(null);
   const [booking, setBooking] = useState(null);
   const [profile, setProfile] = useState(null);
@@ -2184,10 +2318,10 @@ function Services({ notify, initialType, user, onAuth, district }) {
     const boatService = ["HOUSEBOAT", "SMALL_BOAT"].includes(type);
     let query = boatService
       ? supabase.from(type === "HOUSEBOAT" ? "houseboat_listings" : "small_boat_listings").select("id,provider_id,name,boarding_point,capacity,approximate_price_bdt,pricing_unit,water_bodies(is_sundarbans)").eq("status", "PUBLISHED")
-      : supabase.from("public_provider_details").select("id,user_id,type,display_name,bio,photo_url,identity_verified,rating_average,rating_count,district,email,phone,blood_group,gender,working_place,hobby,present_address,permanent_address").eq("type", service.providerType);
+      : supabase.from("public_provider_details").select("id,user_id,type,display_name,service_name,bio,photo_url,identity_verified,rating_average,rating_count,district,email,phone,blood_group,gender,working_place,hobby,present_address,permanent_address").eq("type", service.providerType);
     if (!boatService && district) query = query.eq("district", district.name);
     if (boatService) {
-      let profileQuery = supabase.from("public_provider_details").select("id,user_id,type,display_name,bio,photo_url,rating_average,rating_count,district,email,phone,blood_group,gender,working_place,hobby,present_address,permanent_address");
+      let profileQuery = supabase.from("public_provider_details").select("id,user_id,type,display_name,service_name,bio,photo_url,rating_average,rating_count,district,email,phone,blood_group,gender,working_place,hobby,present_address,permanent_address");
       if (district) profileQuery = profileQuery.eq("district", district.name);
       Promise.all([query, profileQuery]).then(([listingResult, profileResult]) => {
         if (listingResult.error || profileResult.error) notify(listingResult.error?.message || profileResult.error?.message || "Could not load provider details.");
@@ -2234,12 +2368,13 @@ function Services({ notify, initialType, user, onAuth, district }) {
     notify("Booking request sent.");
   };
   if (profile) return <PublicPersonProfile person={profile} user={user} notify={notify} backLabel="Back to local services" onBack={() => setProfile(null)} onFollowerChange={(change) => setProfile((current) => ({ ...current, follower_count: Math.max(0, (current.follower_count || 0) + change) }))} />;
+  const providerTitle = (listing) => listing.service_name || listing.display_name || listing.name;
 
   return (
     <main className="page-shell page-top services-page">
       <div className="page-title"><p className="eyebrow">Local services</p><h1>Plan first. Ask for help when you need it.</h1><p>Public details stay useful; private contact unlocks only after a booking is confirmed.</p></div>
-      <div className="service-tabs" role="tablist">{Object.entries(SERVICE_META).map(([id, item]) => { const Icon = item.icon; return <button role="tab" aria-selected={type === id} className={type === id ? "active" : ""} onClick={() => setType(id)} key={id}><Icon />{item.label}</button>; })}</div>
-      {listings.length ? <div className="provider-grid">{listings.map((listing) => <article className="provider-card" key={listing.id}>{listing.user_id ? <button type="button" className="provider-photo" onClick={() => openProfile(listing)} aria-label={`View ${listing.display_name || listing.name} profile`}>{listing.photo_url ? <img src={listing.photo_url} alt="" /> : <ServiceIcon />}</button> : <span className="provider-photo">{listing.photo_url ? <img src={listing.photo_url} alt="" /> : <ServiceIcon />}</span>}<div>{listing.user_id ? <button type="button" className="provider-name" onClick={() => openProfile(listing)}><h2>{listing.display_name || listing.name}</h2></button> : <h2>{listing.display_name || listing.name}</h2>}<ProviderRating profile={listing} /><p>{listing.bio || (listing.boarding_point ? `${listing.boarding_point} · capacity ${listing.capacity}` : "Available for requests in selected service areas.")}</p>{listing.approximate_price_bdt ? <b>About ৳{listing.approximate_price_bdt} / {listing.pricing_unit || "trip"}</b> : null}<PublicProfileDetails profile={listing} /></div><button className="button primary" onClick={() => requestBooking(listing)}>Request booking</button></article>)}</div> : <div className="empty-provider"><span><ServiceIcon /></span><p className="eyebrow">{service.label}{district ? ` in ${district.name}` : ""}</p><h2>No {service.label.toLowerCase()} are available here yet.</h2><p>Providers will appear here after they add this district to their public profile.</p></div>}
+      <div className="service-tabs" role="tablist">{Object.entries(SERVICE_META).map(([id, item]) => { const Icon = item.icon; return <button role="tab" aria-selected={type === id} className={type === id ? "active" : ""} onClick={() => onTypeChange(id)} key={id}><Icon />{item.label}</button>; })}</div>
+      {listings.length ? <div className="provider-grid">{listings.map((listing) => <article className="provider-card" key={listing.id}>{listing.user_id ? <button type="button" className="provider-photo" onClick={() => openProfile(listing)} aria-label={`View ${providerTitle(listing)} profile`}>{listing.photo_url ? <img src={listing.photo_url} alt="" /> : <ServiceIcon />}</button> : <span className="provider-photo">{listing.photo_url ? <img src={listing.photo_url} alt="" /> : <ServiceIcon />}</span>}<div>{listing.user_id ? <button type="button" className="provider-name" onClick={() => openProfile(listing)}><h2>{providerTitle(listing)}</h2></button> : <h2>{providerTitle(listing)}</h2>}{listing.service_name && listing.display_name && listing.service_name !== listing.display_name ? <p className="provider-owner-name">Provider: {listing.display_name}</p> : null}<ProviderRating profile={listing} /><p>{listing.bio || (listing.boarding_point ? `${listing.boarding_point} · capacity ${listing.capacity}` : "Available for requests in selected service areas.")}</p>{listing.approximate_price_bdt ? <b>About ৳{listing.approximate_price_bdt} / {listing.pricing_unit || "trip"}</b> : null}<PublicProfileDetails profile={listing} /></div><button className="button primary" onClick={() => requestBooking(listing)}>Request booking</button></article>)}</div> : <div className="empty-provider"><span><ServiceIcon /></span><p className="eyebrow">{service.label}{district ? ` in ${district.name}` : ""}</p><h2>No {service.label.toLowerCase()} are available here yet.</h2><p>Providers will appear here after they add this district to their public profile.</p></div>}
       {booking ? <BookingDialog listing={booking} serviceType={type} onClose={() => setBooking(null)} onSubmit={submitBooking} /> : null}
     </main>
   );
@@ -2265,11 +2400,15 @@ function LoginRequired({ onSignIn, onBrowsePlaces }) {
 export default function App() {
   usePublishedTourism();
   const auth = useAuth();
-  const [view, setView] = useState("home");
-  const [serviceDistrict, setServiceDistrict] = useState(null);
-  const [selectedIds, setSelectedIds] = useState([]);
+  const [view, setView] = useState(viewFromLocation);
+  const [serviceDistrictId, setServiceDistrictId] = useSessionState("tourismubd.service-district", "");
+  const [selectedIds, setSelectedIds] = useSessionState("tourismubd.selected-places", []);
+  const [exploreFilters, setExploreFilters] = useSessionState("tourismubd.explore-filters", { query: "", category: "All", categoriesExpanded: false });
+  const [tripSettings, setTripSettings] = useSessionState("tourismubd.trip-settings", { districtId: "", start: "town-center", days: 2 });
+  const [peopleQuery, setPeopleQuery] = useSessionState("tourismubd.people-query", "");
+  const [marketplaceQuery, setMarketplaceQuery] = useSessionState("tourismubd.marketplace-query", "");
   const [activePlace, setActivePlace] = useState(null);
-  const [serviceType, setServiceType] = useState("GUIDE");
+  const [serviceType, setServiceType] = useSessionState("tourismubd.service-type", "GUIDE");
   const [toast, setToast] = useState("");
   const [authOpen, setAuthOpen] = useState(false);
   const [deactivationOpen, setDeactivationOpen] = useState(false);
@@ -2280,6 +2419,18 @@ export default function App() {
   const [linkedProfileReadOnly, setLinkedProfileReadOnly] = useState(false);
   const [theme, setTheme] = useState(() => localStorage.getItem("tourismubd.theme") === "dark" ? "dark" : "light");
   const pendingAuthActionRef = useRef(null);
+  const serviceDistrict = districts.find((district) => district.id === serviceDistrictId) || null;
+
+  useEffect(() => {
+    updateBrowserView(view, true);
+    const handlePopState = () => {
+      setActivePlace(null);
+      setView(viewFromLocation());
+      window.scrollTo(0, 0);
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -2288,7 +2439,7 @@ export default function App() {
 
   useEffect(() => {
     setSelectedIds([]);
-    setServiceDistrict(null);
+    setServiceDistrictId("");
     setMessagesOpen(false);
     setMessageProfile(null);
   }, [auth.user?.id]);
@@ -2302,11 +2453,14 @@ export default function App() {
     pendingAuthActionRef.current = afterAuthentication;
     setAuthOpen(true);
   };
+  const showView = (nextView, replace = false) => {
+    setActivePlace(null);
+    setView(nextView);
+    updateBrowserView(nextView, replace);
+    window.scrollTo(0, 0);
+  };
   const navigate = (nextView) => {
-    const openView = () => {
-      setView(nextView);
-      window.scrollTo(0, 0);
-    };
+    const openView = () => showView(nextView);
     if (viewRequiresAuthentication(nextView, auth.user)) {
       requestAuthentication(openView);
       return false;
@@ -2321,7 +2475,7 @@ export default function App() {
   };
   const openPlace = (place) => { setActivePlace(place); window.scrollTo(0, 0); };
   const openServices = (type = "GUIDE") => {
-    const open = () => { setServiceType(type); setView("services"); setActivePlace(null); window.scrollTo(0, 0); };
+    const open = () => { setServiceType(type); showView("services"); };
     if (!auth.user) return requestAuthentication(open);
     open();
   };
@@ -2329,9 +2483,7 @@ export default function App() {
     const place = activePlace;
     const open = () => {
       if (place) setSelectedIds((ids) => ids.includes(place.id) ? ids : [...ids, place.id]);
-      setActivePlace(null);
-      setView("trip");
-      window.scrollTo(0, 0);
+      showView("trip");
     };
     if (!auth.user) return requestAuthentication(open);
     open();
@@ -2394,8 +2546,7 @@ export default function App() {
     window.history.replaceState({}, "", url);
     setLinkedProfile(null);
     setLinkedProfileReadOnly(false);
-    setView("home");
-    window.scrollTo(0, 0);
+    showView("home", true);
   };
   const openDashboard = async (user = auth.user) => {
     if (!user) return setAuthOpen(true);
@@ -2407,8 +2558,7 @@ export default function App() {
       notify("Account reactivated.");
     }
     const role = data?.role || user.user_metadata?.role || "TRAVELER";
-    setView(role === "TRAVELER" ? "traveler" : role === "BUSINESS_OWNER" ? "business" : "provider");
-    window.scrollTo(0, 0);
+    showView(role === "TRAVELER" ? "traveler" : role === "BUSINESS_OWNER" ? "business" : "provider");
   };
   const authenticationComplete = async (user) => {
     const pendingAction = pendingAuthActionRef.current;
@@ -2423,7 +2573,7 @@ export default function App() {
     if (error) return error.message;
     setDeactivationOpen(false);
     await supabase.auth.signOut();
-    setView("home");
+    showView("home", true);
     notify("Account deactivated. Sign in within three months to keep it.");
     return "";
   };
@@ -2431,7 +2581,7 @@ export default function App() {
     setSignOutOpen(false);
     setMessagesOpen(false);
     await supabase.auth.signOut();
-    setView("home");
+    showView("home", true);
     notify("Signed out.");
   };
   const protectedView = viewRequiresAuthentication(view, auth.user) && !(view === "linked-profile" && linkedProfileReadOnly);
@@ -2442,20 +2592,20 @@ export default function App() {
         <Header view={view} setView={navigate} tripCount={selectedIds.length} user={auth.user} onAuth={() => auth.user ? openDashboard() : requestAuthentication()} onDeactivate={() => setDeactivationOpen(true)} onSignOut={() => setSignOutOpen(true)} onOpenAbout={() => navigate("account-about")} onOpenBookings={() => navigate("booking-requests")} onOpenRatings={() => navigate("provider-ratings")} onOpenMessages={() => setMessagesOpen(true)} onOpenBusinessCatalog={() => navigate("business-catalog")} notify={notify} theme={theme} onThemeChange={setTheme} />
         {protectedView ? <LoginRequired onSignIn={() => requestAuthentication(() => window.scrollTo(0, 0))} onBrowsePlaces={() => navigate("explore")} /> : null}
         {!protectedView && view === "home" ? <Home setView={navigate} openServices={openServices} openPlace={openPlace} selectedIds={selectedIds} togglePlace={togglePlace} /> : null}
-        {view === "explore" ? <Explore selectedIds={selectedIds} togglePlace={togglePlace} openPlace={openPlace} /> : null}
-        {!protectedView && view === "trip" ? <TripPlanner user={auth.user} selectedIds={selectedIds} setSelectedIds={setSelectedIds} notify={notify} onDistrictSelected={setServiceDistrict} /> : null}
-        {!protectedView && view === "services" ? <Services notify={notify} initialType={serviceType} user={auth.user} onAuth={() => requestAuthentication()} district={serviceDistrict} /> : null}
-        {!protectedView && view === "people" ? <PeopleDirectory notify={notify} user={auth.user} /> : null}
+        {view === "explore" ? <Explore selectedIds={selectedIds} togglePlace={togglePlace} openPlace={openPlace} filters={exploreFilters} setFilters={setExploreFilters} /> : null}
+        {!protectedView && view === "trip" ? <TripPlanner user={auth.user} selectedIds={selectedIds} setSelectedIds={setSelectedIds} notify={notify} onDistrictSelected={(district) => setServiceDistrictId(district?.id || "")} settings={tripSettings} setSettings={setTripSettings} /> : null}
+        {!protectedView && view === "services" ? <Services notify={notify} type={serviceType} onTypeChange={setServiceType} user={auth.user} onAuth={() => requestAuthentication()} district={serviceDistrict} /> : null}
+        {!protectedView && view === "people" ? <PeopleDirectory notify={notify} user={auth.user} query={peopleQuery} setQuery={setPeopleQuery} /> : null}
         {!protectedView && view === "feed" ? <CommunityFeed user={auth.user} notify={notify} /> : null}
-        {!protectedView && view === "shop" ? <Marketplace /> : null}
+        {!protectedView && view === "shop" ? <Marketplace query={marketplaceQuery} setQuery={setMarketplaceQuery} /> : null}
         {view === "provider" && auth.user ? <ProviderDashboard user={auth.user} notify={notify} /> : null}
-        {view === "booking-requests" && auth.user ? <ProviderBookingRequestsPage user={auth.user} notify={notify} onBack={() => setView("provider")} /> : null}
+        {view === "booking-requests" && auth.user ? <ProviderBookingRequestsPage user={auth.user} notify={notify} onBack={() => showView("provider")} /> : null}
         {view === "traveler" && auth.user ? <TravelerDashboard user={auth.user} notify={notify} /> : null}
         {view === "business" && auth.user ? <BusinessDashboard user={auth.user} notify={notify} /> : null}
         {view === "business-catalog" && auth.user ? <BusinessCatalogPage user={auth.user} notify={notify} onBack={() => navigate("business")} /> : null}
         {view === "account-about" && auth.user ? <AccountAboutPage user={auth.user} notify={notify} onBack={openDashboard} /> : null}
-        {view === "provider-ratings" && auth.user ? <TravelerRatingsPage user={auth.user} notify={notify} onBack={() => setView("traveler")} /> : null}
-        {view === "message-profile" && auth.user && messageProfile ? <PublicPersonProfile person={messageProfile.person} user={auth.user} notify={notify} backLabel="Back to messages" onBack={() => { setView(messageProfile.returnView); setMessageProfile(null); setMessagesOpen(true); }} onFollowerChange={(change) => setMessageProfile((current) => ({ ...current, person: { ...current.person, follower_count: Math.max(0, (current.person.follower_count || 0) + change) } }))} /> : null}
+        {view === "provider-ratings" && auth.user ? <TravelerRatingsPage user={auth.user} notify={notify} onBack={() => showView("traveler")} /> : null}
+        {view === "message-profile" && auth.user && messageProfile ? <PublicPersonProfile person={messageProfile.person} user={auth.user} notify={notify} backLabel="Back to messages" onBack={() => { showView(messageProfile.returnView); setMessageProfile(null); setMessagesOpen(true); }} onFollowerChange={(change) => setMessageProfile((current) => ({ ...current, person: { ...current.person, follower_count: Math.max(0, (current.person.follower_count || 0) + change) } }))} /> : null}
         {view === "linked-profile" && linkedProfile && (auth.user || linkedProfileReadOnly) ? <PublicPersonProfile person={linkedProfile} user={auth.user} notify={notify} readOnly={linkedProfileReadOnly} backLabel="Back to TourismuBD" onBack={closeLinkedProfile} onFollowerChange={(change) => setLinkedProfile((current) => ({ ...current, follower_count: Math.max(0, (current.follower_count || 0) + change) }))} /> : null}
         <Footer />
       </>}

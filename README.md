@@ -96,6 +96,19 @@ where email = 'admin@gmail.com';
 
 The portal can edit, hide/suspend/cancel, and permanently delete operational records under RLS. Audit history is read-only. Permanent deletion of an Auth user must use a server-side Supabase Admin API or Edge Function; the service-role key must never be added to this frontend.
 
+### Admin-only invitations
+
+Apply migrations `085_secondary_admin_management.sql`, `086_secondary_admin_email_invites.sql`, and `087_admin_only_email_invitations.sql` in order. Then deploy the invitation function:
+
+```bash
+supabase functions deploy invite-secondary-admin
+supabase secrets set ADMIN_INVITE_REDIRECT_URL=https://admin.example.com/
+```
+
+The Super Admin can then add any email from **Admin Management**. TourismuBD sends a password-setup invitation, creates an Admin-only identity, and keeps that identity out of People, public profiles, and the timeline. The link opens the Admin password-setup screen, then the new Admin signs in at the Admin URL with that email and password. For local development, set `ADMIN_INVITE_REDIRECT_URL=http://127.0.0.1:5176/` in `.env` and allow `http://127.0.0.1:5176/?admin-invite=1` in Supabase Authentication redirect URLs.
+
+Supabase's built-in email service is only suitable for testing and can send only to organization team addresses with a low rate limit. Configure a custom SMTP provider for reliable invitation delivery. When delivery is unavailable, Admin Management presents a secure one-time setup link that a Super Admin can share privately. See [Supabase's SMTP guide](https://supabase.com/docs/guides/auth/auth-smtp).
+
 ## Current scope
 
 - 10 canonical Sylhet places and curated 1–3 day itineraries

@@ -46,17 +46,30 @@ export function usePublishedTourism() {
   useEffect(() => {
     if (!supabase) return undefined;
     let active = true;
-    Promise.all([
-      supabase.from("districts").select("id,district_code,name,division,slug,display_order").eq("status", "PUBLISHED").order("display_order").order("name"),
-      supabase.from("places").select("id,district_id,name,slug,upazila_or_area,category,latitude,longitude,short_description,best_time,how_to_reach,practical_tips,last_verified_at,image_url,districts!inner(name,slug)").eq("status", "PUBLISHED").order("name"),
-    ]).then(([districtResult, placeResult]) => {
-      if (!active || districtResult.error || placeResult.error || !districtResult.data.length) return;
-      replacePublishedTourismData(
-        districtResult.data.map((row) => ({ id: row.slug, name: row.name, division: row.division, slug: row.slug, status: "published" })),
-        placeResult.data.map(mapPlace),
-      );
-      rerender((value) => value + 1);
-    });
-    return () => { active = false; };
+    const refreshPublishedTourism = () => {
+      Promise.all([
+        supabase.from("districts").select("id,district_code,name,division,slug,display_order").eq("status", "PUBLISHED").order("display_order").order("name"),
+        supabase.from("places").select("id,district_id,name,slug,upazila_or_area,category,latitude,longitude,short_description,best_time,how_to_reach,practical_tips,last_verified_at,image_url,districts!inner(name,slug)").eq("status", "PUBLISHED").order("name"),
+      ]).then(([districtResult, placeResult]) => {
+        if (!active || districtResult.error || placeResult.error || !districtResult.data.length) return;
+        replacePublishedTourismData(
+          districtResult.data.map((row) => ({ id: row.slug, name: row.name, division: row.division, slug: row.slug, status: "published" })),
+          placeResult.data.map(mapPlace),
+        );
+        rerender((value) => value + 1);
+      });
+    };
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") refreshPublishedTourism();
+    };
+
+    refreshPublishedTourism();
+    window.addEventListener("focus", refreshPublishedTourism);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      active = false;
+      window.removeEventListener("focus", refreshPublishedTourism);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
   }, []);
 }

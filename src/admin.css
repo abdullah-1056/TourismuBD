@@ -39,12 +39,42 @@ button, input, textarea, select { font: inherit; }
 .ops-note h2 { margin: 0 0 5px; font-size: 17px; }
 .ops-note p { margin: 0; color: #68726d; font-size: 13px; line-height: 1.6; }
 .ops-table-panel { background: white; border: 1px solid var(--ops-line); border-radius: 7px; overflow: hidden; }
+.ops-admin-management { display: grid; gap: 16px; }
+.ops-admin-intro { padding: 4px 0; }
+.ops-admin-intro h2 { margin: 4px 0 7px; font-size: 24px; }
+.ops-admin-intro p { margin: 0; color: #68716d; font-size: 13px; line-height: 1.5; }
+.ops-admin-grid { display: grid; grid-template-columns: minmax(270px, 340px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.ops-admin-form-panel { padding: 20px; border: 1px solid var(--ops-line); border-radius: 7px; background: white; }
+.ops-admin-form-panel h3 { margin: 0 0 7px; font-size: 17px; }
+.ops-admin-form-panel > p { margin: 0 0 17px; color: #68716d; font-size: 12px; line-height: 1.5; }
+.ops-admin-form-panel .ops-admin-alert { margin: 0 0 14px; }
+.ops-admin-setup-link { display: grid; gap: 8px; margin: 0 0 14px; padding: 12px; border: 1px solid #e2c373; border-radius: 5px; background: #fff9df; color: #5e4b13; font-size: 12px; }
+.ops-admin-setup-link strong { color: #3d3211; }
+.ops-admin-setup-link p { margin: 0; line-height: 1.45; }
+.ops-admin-setup-link input { min-width: 0; width: 100%; min-height: 35px; padding: 0 9px; border: 1px solid #d8c078; border-radius: 4px; background: white; color: #3d3211; font: 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.ops-admin-setup-link .ops-button { justify-self: start; }
+.ops-admin-form { display: grid; gap: 14px; }
+.ops-admin-form label { display: grid; gap: 7px; color: #343b38; font-size: 11px; font-weight: 800; }
+.ops-admin-form input:not([type="checkbox"]), .ops-admin-form select { min-height: 38px; width: 100%; padding: 0 10px; border: 1px solid var(--ops-line); border-radius: 5px; background: white; color: var(--ops-ink); font: inherit; }
+.ops-admin-form .ops-check-label { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.ops-admin-form .ops-check-label input { width: 15px; height: 15px; accent-color: var(--ops-teal); }
+.ops-admin-form .ops-dialog-actions { justify-content: stretch; }
+.ops-admin-form .ops-dialog-actions .ops-button { flex: 1; }
 .ops-provider-tabs { display: flex; gap: 6px; padding: 12px 14px; overflow-x: auto; border-bottom: 1px solid var(--ops-line); background: #f8f9f7; scrollbar-width: thin; }
 .ops-provider-tabs button { min-height: 34px; display: inline-flex; flex: 0 0 auto; align-items: center; gap: 7px; padding: 0 11px; border: 1px solid var(--ops-line); border-radius: 5px; color: #59625e; background: white; font-size: 11px; font-weight: 750; white-space: nowrap; cursor: pointer; }
 .ops-provider-tabs button:hover { color: var(--ops-ink); border-color: #aab2ad; }
 .ops-provider-tabs button.active { color: white; background: var(--ops-teal); border-color: var(--ops-teal); }
 .ops-provider-tabs svg { width: 15px; }
-.ops-business-tabs { margin-bottom: 12px; border: 1px solid var(--ops-line); border-radius: 7px; }
+.ops-subscription-tabs { display: flex; gap: 6px; padding: 12px 14px; border-bottom: 1px solid var(--ops-line); background: #f8f9f7; }
+.ops-subscription-tabs button { min-height: 34px; display: inline-flex; align-items: center; gap: 7px; padding: 0 11px; border: 1px solid var(--ops-line); border-radius: 5px; color: #59625e; background: white; font-size: 11px; font-weight: 750; cursor: pointer; }
+.ops-subscription-tabs button:hover { color: var(--ops-ink); border-color: #aab2ad; }
+.ops-subscription-tabs button.active { color: white; background: var(--ops-teal); border-color: var(--ops-teal); }
+.ops-subscription-tabs svg { width: 15px; }
+.ops-place-tabs { display: flex; gap: 6px; margin: 0 0 12px; }
+.ops-place-tabs button { min-height: 34px; display: inline-flex; align-items: center; gap: 7px; padding: 0 11px; border: 1px solid var(--ops-line); border-radius: 5px; color: #59625e; background: white; font-size: 11px; font-weight: 750; cursor: pointer; }
+.ops-place-tabs button:hover { color: var(--ops-ink); border-color: #aab2ad; }
+.ops-place-tabs button.active { color: white; background: var(--ops-teal); border-color: var(--ops-teal); }
+.ops-place-tabs svg { width: 15px; }
 .ops-table-tools { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px; border-bottom: 1px solid var(--ops-line); }
 .ops-table-filters { display: flex; align-items: center; min-width: 0; gap: 8px; }
 .ops-table-tools label { width: min(340px, 38vw); position: relative; }
@@ -54,15 +84,26 @@ button, input, textarea, select { font: inherit; }
 .ops-table-actions { display: flex; align-items: center; gap: 8px; }
 .ops-table-actions .ops-button { min-height: 36px; }
 .ops-table-wrap { overflow-x: auto; }
-.ops-table-panel table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.ops-table-panel table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: 12px; }
 .ops-table-panel th { padding: 11px 13px; color: #69716d; background: #f6f7f4; border-bottom: 1px solid var(--ops-line); font-size: 10px; text-align: left; text-transform: uppercase; }
 .ops-table-panel td { max-width: 240px; padding: 12px 13px; overflow: hidden; border-bottom: 1px solid #eceeeb; text-overflow: ellipsis; white-space: nowrap; }
 .ops-table-panel tbody tr:hover { background: #fafbf8; }
-.ops-row-actions { display: flex; gap: 5px; min-width: 120px; }
+.ops-table-panel th:last-child, .ops-table-panel td:last-child { position: sticky; right: 0; width: max-content; min-width: 132px; }
+.ops-table-panel th:last-child { z-index: 2; background: #f6f7f4; box-shadow: -1px 0 0 var(--ops-line); }
+.ops-table-panel td:last-child { z-index: 1; background: white; box-shadow: -1px 0 0 #eceeeb; }
+.ops-table-panel tbody tr:hover td:last-child { background: #fafbf8; }
+.ops-row-actions { display: flex; justify-content: flex-end; gap: 5px; min-width: max-content; }
 .ops-row-actions button { width: 30px; }
-.ops-row-actions .ops-view-profile { width: auto; min-width: 104px; min-height: 30px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 10px; color: white; background: var(--ops-teal); border: 1px solid var(--ops-teal); border-radius: 5px; font-size: 10px; font-weight: 800; line-height: 1; text-decoration: none; white-space: nowrap; }
+.ops-row-actions .ops-view-profile { display: inline-grid; place-items: center; width: 30px; aspect-ratio: 1; color: white; background: var(--ops-teal); border: 1px solid var(--ops-teal); border-radius: 5px; text-decoration: none; }
 .ops-row-actions .ops-view-profile:hover { color: white; background: #12675f; border-color: #12675f; }
 .ops-row-actions button.danger { color: var(--ops-danger); }
+.ops-secondary-admin .ops-subscription-tabs button:last-child { display: none; }
+.ops-secondary-admin.ops-reports .ops-row-actions > button[aria-label="Delete record"] { display: none; }
+.ops-activate-accounts .ops-row-actions button[aria-label="Remove record"] { width: auto; min-width: 100px; height: 30px; aspect-ratio: auto; display: inline-flex; gap: 6px; padding: 0 11px; color: white; background: var(--ops-teal); border-color: var(--ops-teal); }
+.ops-activate-accounts .ops-row-actions button[aria-label="Remove record"]::after { content: "Activate"; font-size: 11px; font-weight: 750; }
+.ops-activate-accounts .ops-row-actions button[aria-label="Remove record"]:hover { background: #12675f; border-color: #12675f; }
+.ops-users:not(.ops-activate-accounts) .ops-row-actions button[aria-label="Remove record"], .ops-provider-blocking:not(.ops-activate-accounts) .ops-row-actions button[aria-label="Remove record"] { width: auto; min-width: 82px; height: 30px; aspect-ratio: auto; display: inline-flex; gap: 6px; padding: 0 11px; color: white; background: var(--ops-danger); border-color: var(--ops-danger); }
+.ops-users:not(.ops-activate-accounts) .ops-row-actions button[aria-label="Remove record"]::after, .ops-provider-blocking:not(.ops-activate-accounts) .ops-row-actions button[aria-label="Remove record"]::after { content: "Block"; font-size: 11px; font-weight: 750; }
 .ops-row-actions button:disabled { opacity: .35; cursor: not-allowed; }
 .ops-readonly { display: inline-flex; align-items: center; gap: 6px; color: #66706b; }
 .ops-readonly svg { width: 15px; }
@@ -80,11 +121,24 @@ button, input, textarea, select { font: inherit; }
 .ops-login-panel > p:not(.ops-kicker):not(.ops-error) { margin: 0 0 24px; color: #646d69; font-size: 13px; line-height: 1.6; }
 .ops-login-panel form { display: grid; gap: 15px; }
 .ops-login-panel label, .ops-editor label { display: grid; gap: 7px; font-size: 12px; font-weight: 800; }
-.ops-login-panel input { width: 100%; height: 43px; padding: 0 11px; border: 1px solid var(--ops-line); border-radius: 5px; font: inherit; }
+.ops-login-panel input, .ops-password-form input { box-sizing: border-box; width: 100%; height: 43px; padding: 0 11px; border: 1px solid var(--ops-line); border-radius: 5px; font: inherit; }
 .ops-login-panel > a:not(.ops-button) { display: inline-block; margin-top: 20px; color: #505955; font-size: 12px; }
 .ops-button { min-height: 42px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 0 15px; border: 1px solid #171a1d; border-radius: 5px; color: white; background: #171a1d; font: 800 12px/1 inherit; text-decoration: none; cursor: pointer; }
 .ops-button:hover { background: #2c3134; }
 .ops-button.secondary { color: #303633; background: white; border-color: var(--ops-line); }
+.ops-button.danger { color: white; background: var(--ops-danger); border-color: var(--ops-danger); }
+.ops-button.danger:hover { background: #8f2c28; border-color: #8f2c28; }
+.ops-text-button { justify-self: start; padding: 0; border: 0; color: #505955; background: transparent; font: 700 12px/1.4 inherit; text-decoration: underline; cursor: pointer; }
+.ops-text-button:hover { color: var(--ops-teal); }
+.ops-success { margin: 0; padding: 11px 12px; color: #176258; background: #e5f2ef; border: 1px solid #b9d9d3; border-radius: 5px; font-size: 12px; line-height: 1.5; }
+.ops-reported-post-product { margin: 0 0 9px; color: var(--ops-teal); font-weight: 700; }
+.ops-reported-post-body { margin: 0; white-space: pre-wrap; line-height: 1.6; }
+.ops-reported-post-location { display: flex; align-items: center; gap: 6px; margin: 14px 0 0; color: var(--ops-muted); font-size: 13px; }
+.ops-reported-post-location svg { width: 16px; height: 16px; color: var(--ops-teal); }
+.ops-reported-post-media { display: block; width: min(100%, 680px); max-height: 440px; margin-top: 16px; object-fit: contain; background: #111; border: 1px solid var(--ops-line); border-radius: 6px; }
+.ops-report-reasons { display: flex; flex-wrap: wrap; gap: 7px 16px; margin-top: 8px; }
+.ops-report-reasons label { display: inline-flex; align-items: center; gap: 6px; color: var(--ops-ink); font-weight: 500; line-height: 1.4; }
+.ops-report-reasons input { width: 15px; height: 15px; margin: 0; accent-color: var(--ops-teal); }
 .ops-button svg { width: 17px; }
 .ops-error { margin: 0; color: var(--ops-danger); font-size: 12px; line-height: 1.5; }
 .ops-denied-icon, .ops-setup-icon { width: 44px; height: 44px; margin-bottom: 18px; color: var(--ops-danger); }
@@ -95,11 +149,21 @@ button, input, textarea, select { font: inherit; }
 .ops-gate p { color: #b4bbb8; font-size: 12px; }
 .ops-spin { animation: ops-spin .9s linear infinite; }
 @keyframes ops-spin { to { transform: rotate(360deg); } }
+.app-recovery { display: grid; min-height: 100vh; place-items: center; padding: 24px; color: var(--ops-ink); background: var(--ops-page); }
+.app-recovery > div { width: min(100%, 520px); padding: 32px; border: 1px solid var(--ops-line); border-radius: 7px; background: #fff; }
+.app-recovery .eyebrow { margin: 0; color: var(--ops-teal); font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.app-recovery h1 { margin: 8px 0 12px; font-size: 28px; }
+.app-recovery p { line-height: 1.5; }
+.app-recovery button { margin-top: 12px; padding: 10px 16px; border: 0; border-radius: 5px; color: #fff; background: var(--ops-teal); font: inherit; font-weight: 700; cursor: pointer; }
 .ops-dialog { width: min(720px, calc(100% - 32px)); max-height: calc(100vh - 32px); padding: 0; border: 0; border-radius: 7px; }
 .ops-dialog::backdrop { background: rgb(12 14 15 / 72%); }
 .ops-editor { position: relative; padding: 27px; }
 .ops-editor h2 { margin: 0 0 20px; font-size: 25px; }
 .ops-editor textarea { width: 100%; padding: 12px; color: #26302b; background: #f6f7f4; border: 1px solid var(--ops-line); border-radius: 5px; font: 12px/1.55 ui-monospace, SFMono-Regular, monospace; resize: vertical; }
+.ops-password-dialog { width: min(480px, calc(100% - 32px)); }
+.ops-password-form { display: grid; gap: 14px; }
+.ops-password-form h2 { margin-bottom: 0; }
+.ops-password-help { margin: -4px 0 3px; color: #646d69; font-size: 12px; line-height: 1.55; }
 .ops-place-dialog { width: min(920px, calc(100% - 32px)); }
 .ops-provider-dialog { width: min(860px, calc(100% - 32px)); }
 .ops-place-editor { max-height: calc(100vh - 32px); overflow-y: auto; }
@@ -139,6 +203,10 @@ button, input, textarea, select { font: inherit; }
 .ops-provider-listings article span { color: var(--ops-teal); font-size: 9px; font-weight: 800; }
 .ops-provider-listings p { margin: 7px 0 3px; font-size: 12px; }
 .ops-provider-listings small { color: #68726d; font-size: 10px; }
+.ops-booking-history { display: grid; gap: 12px; }
+.ops-booking-history article { padding: 14px; border: 1px solid var(--ops-line); border-radius: 5px; background: #fff; }
+.ops-booking-history-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.ops-booking-history-head h4 { margin: 0; font-size: 16px; }
 .ops-toast { position: fixed; right: 20px; bottom: 20px; max-width: 320px; padding: 12px 15px; color: white; background: #171a1d; border-left: 4px solid var(--ops-accent); border-radius: 5px; opacity: 0; pointer-events: none; transform: translateY(10px); transition: .2s ease; }
 .ops-toast.show { opacity: 1; transform: translateY(0); }
 @media (max-width: 900px) {
@@ -149,6 +217,7 @@ button, input, textarea, select { font: inherit; }
   .ops-sidebar nav button { white-space: nowrap; }
   .ops-main { padding: 22px 14px 45px; }
   .ops-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ops-admin-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 540px) {
   .ops-topbar { align-items: flex-start; }

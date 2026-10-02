@@ -1,2 +1,5 @@
 [functions.purge-deactivated-accounts]
 verify_jwt = false
+
+[functions.invite-secondary-admin]
+verify_jwt = false

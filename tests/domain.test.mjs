@@ -73,6 +73,10 @@ assert.equal(suggestedPlacesForDistrict("lakshmipur").length, 6);
 assert.equal(suggestedPlacesForDistrict("noakhali").length, 8);
 assert.deepEqual(suggestedPlacesForDistrict("unknown"), []);
 
+for (const slug of ["foy-s-lake", "boga-lake", "kaptai-lake", "muhuri-lake"]) {
+  assert.equal(places.find((place) => place.slug === slug)?.category, "Lake", slug);
+}
+
 const legacyIdPlaces = suggestedPlacesForDistrict("sylhet").slice(0, 2);
 legacyIdPlaces.forEach((place, index) => { place.databaseId = `legacy-database-id-${index}`; });
 assert.deepEqual(
@@ -445,6 +449,9 @@ assert.match(tourismContent, /RAJSHAHI_PLACE_COORDINATES\[districtKey\]/);
 assert.match(tourismContent, /FALLBACK_PLACE_COORDINATES\[districtKey\]/);
 assert.match(tourismContent, /id: row\.slug/);
 assert.match(tourismContent, /databaseId: row\.id/);
+assert.match(tourismContent, /from\("places"\)[\s\S]*\.eq\("status", "PUBLISHED"\)/);
+assert.match(tourismContent, /window\.addEventListener\("focus", refreshPublishedTourism\)/);
+assert.match(tourismContent, /document\.addEventListener\("visibilitychange", refreshWhenVisible\)/);
 assert.match(app, /message !== "\{\}"/);
 assert.match(app, /Supabase could not \$\{action\}/);
 assert.match(app, /Your service requests/);
@@ -452,7 +459,7 @@ assert.match(app, /Booking requests/);
 assert.match(app, /onOpenBookings/);
 assert.match(app, /function ProviderBookingRequestsPage/);
 assert.match(app, /view === "booking-requests"/);
-assert.match(app, /View \$\{listing\.display_name \|\| listing\.name\} profile/);
+assert.match(app, /View \$\{providerTitle\(listing\)\} profile/);
 assert.match(app, /Rate providers/);
 assert.match(app, /function TravelerRatingsPage/);
 assert.match(app, /view === "provider-ratings"/);

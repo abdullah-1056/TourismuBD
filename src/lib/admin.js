@@ -4,8 +4,46 @@ export function adminRemovalPatch(remove, userId, now = new Date().toISOString()
   return remove;
 }
 
-export function hasAdminAccess(profile) {
-  return profile?.role === "SUPER_ADMIN" && profile?.status === "ACTIVE";
+export const ADMIN_ROLES = Object.freeze([
+  "users_admin",
+  "business_admin",
+  "provider_admin",
+  "subscription_admin",
+  "booking_admin",
+]);
+
+export const ADMIN_ROLE_LABELS = Object.freeze({
+  super_admin: "Super Admin",
+  users_admin: "Users Admin",
+  business_admin: "Business Admin",
+  provider_admin: "Provider Admin",
+  subscription_admin: "Subscription Admin",
+  booking_admin: "Booking Admin",
+});
+
+const MODULE_ROLE = Object.freeze({
+  users: "users_admin",
+  business: "business_admin",
+  providers: "provider_admin",
+  subscriptions: "subscription_admin",
+  bookings: "booking_admin",
+});
+
+export function hasAdminAccess(access) {
+  return Boolean(access?.is_active && (access.role === "super_admin" || ADMIN_ROLES.includes(access.role)));
+}
+
+export function isSuperAdmin(access) {
+  return access?.role === "super_admin" && access?.is_active;
+}
+
+export function canAccessAdminSection(access, section, resource) {
+  if (!hasAdminAccess(access)) return false;
+  if (section === "overview") return true;
+  if (section === "reports") return isSuperAdmin(access) || ["users_admin", "provider_admin", "business_admin", "subscription_admin", "booking_admin"].includes(access?.role);
+  if (section === "admin-management") return isSuperAdmin(access);
+  if (isSuperAdmin(access)) return true;
+  return MODULE_ROLE[resource?.adminModule] === access.role;
 }
 
 export function canManageProfile(actorId, profileId) {
