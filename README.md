@@ -82,8 +82,8 @@ The local Vite development server bypasses the sign-in screen for UI development
 
 ```sql
 update public.profiles
-set role = 'SUPER_ADMIN', status = 'ACTIVE', updated_at = now()
-where email = 'admin@gmail.com';
+set role = 'MAIN_ADMIN', status = 'ACTIVE', updated_at = now()
+where email = 'YOUR_ADMIN_EMAIL';
 ```
 
 Confirm that exactly one row is returned before signing in at the Admin URL:
@@ -91,7 +91,7 @@ Confirm that exactly one row is returned before signing in at the Admin URL:
 ```sql
 select id, email, role, status
 from public.profiles
-where email = 'admin@gmail.com';
+where email = 'YOUR_ADMIN_EMAIL';
 ```
 
 The portal can edit, hide/suspend/cancel, and permanently delete operational records under RLS. Audit history is read-only. Permanent deletion of an Auth user must use a server-side Supabase Admin API or Edge Function; the service-role key must never be added to this frontend.
