@@ -102,7 +102,20 @@ function localAdminDataPlugin(env) {
               response.statusCode = 400;
               return response.end(JSON.stringify({ error: "Enter the active Super Admin email." }));
             }
-            return response.end(JSON.stringify({ data: { valid: true } }));
+            let recoveryLink = null;
+            try {
+              const redirectTo = new URL(env.ADMIN_INVITE_REDIRECT_URL || "http://127.0.0.1:5176/");
+              redirectTo.searchParams.delete("admin-invite");
+              redirectTo.searchParams.set("admin-recovery", "1");
+              const linkRes = await fetch(`${admin.url}/auth/v1/admin/generate_link`, {
+                method: "POST",
+                headers: { apikey: admin.serviceKey, Authorization: `Bearer ${admin.serviceKey}`, "Content-Type": "application/json" },
+                body: JSON.stringify({ type: "recovery", email, redirect_to: redirectTo.toString() }),
+              });
+              const linkPayload = await linkRes.json().catch(() => null);
+              recoveryLink = linkPayload?.action_link || linkPayload?.properties?.action_link || null;
+            } catch { /* generate_link is best-effort in dev */ }
+            return response.end(JSON.stringify({ data: { valid: true, recoveryLink } }));
           } catch (error) {
             response.statusCode = 502;
             return response.end(JSON.stringify({ error: error instanceof Error ? error.message : "Could not reach Supabase." }));

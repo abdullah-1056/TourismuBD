@@ -102,6 +102,15 @@ button, input, textarea, select { font: inherit; }
 .ops-activate-accounts .ops-row-actions button[aria-label="Remove record"] { width: auto; min-width: 100px; height: 30px; aspect-ratio: auto; display: inline-flex; gap: 6px; padding: 0 11px; color: white; background: var(--ops-teal); border-color: var(--ops-teal); }
 .ops-activate-accounts .ops-row-actions button[aria-label="Remove record"]::after { content: "Activate"; font-size: 11px; font-weight: 750; }
 .ops-activate-accounts .ops-row-actions button[aria-label="Remove record"]:hover { background: #12675f; border-color: #12675f; }
+.ops-activate-accounts .ops-row-actions button[aria-label="Block record"],
+.ops-row-actions button.ops-block-button { width: auto; min-width: 82px; height: 30px; aspect-ratio: auto; display: inline-flex; gap: 6px; padding: 0 11px; color: white; background: var(--ops-danger); border-color: var(--ops-danger); }
+.ops-activate-accounts .ops-row-actions button[aria-label="Block record"]::after,
+.ops-row-actions button.ops-block-button::after { content: "Block"; font-size: 11px; font-weight: 750; }
+.ops-activate-accounts .ops-row-actions button[aria-label="Block record"]:hover,
+.ops-row-actions button.ops-block-button:hover { background: #bd232b; border-color: #bd232b; }
+.ops-reports .ops-row-actions button[aria-label="Remove record"] { width: auto; min-width: 175px; height: 30px; aspect-ratio: auto; display: inline-flex; gap: 6px; padding: 0 11px; color: white; background: var(--ops-danger); border-color: var(--ops-danger); }
+.ops-reports .ops-row-actions button[aria-label="Remove record"]::after { content: "Remove from active use"; font-size: 11px; font-weight: 750; }
+.ops-reports .ops-row-actions button[aria-label="Remove record"]:hover { background: #bd232b; border-color: #bd232b; }
 .ops-users:not(.ops-activate-accounts) .ops-row-actions button[aria-label="Remove record"], .ops-provider-blocking:not(.ops-activate-accounts) .ops-row-actions button[aria-label="Remove record"] { width: auto; min-width: 82px; height: 30px; aspect-ratio: auto; display: inline-flex; gap: 6px; padding: 0 11px; color: white; background: var(--ops-danger); border-color: var(--ops-danger); }
 .ops-users:not(.ops-activate-accounts) .ops-row-actions button[aria-label="Remove record"]::after, .ops-provider-blocking:not(.ops-activate-accounts) .ops-row-actions button[aria-label="Remove record"]::after { content: "Block"; font-size: 11px; font-weight: 750; }
 .ops-row-actions button:disabled { opacity: .35; cursor: not-allowed; }

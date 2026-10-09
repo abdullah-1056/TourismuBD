@@ -8,6 +8,8 @@ const migration = readFileSync(new URL("../supabase/migrations/077_admin_reporte
 const actionMigration = readFileSync(new URL("../supabase/migrations/078_admin_report_actions.sql", import.meta.url), "utf8");
 const reportReasonsMigration = readFileSync(new URL("../supabase/migrations/079_report_reason_categories.sql", import.meta.url), "utf8");
 const reportMediaMigration = readFileSync(new URL("../supabase/migrations/080_admin_reported_post_media.sql", import.meta.url), "utf8");
+const appJsx = readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8");
+const reopenReportsMigration = readFileSync(new URL("../supabase/migrations/106_reopen_timeline_reports.sql", import.meta.url), "utf8");
 
 test("Admin Reports identify the reported timeline post and its owner", () => {
   assert.match(adminApp, /"reported_post_owner", "reported_post_owner_id", "reported_post"/);
@@ -76,3 +78,39 @@ test("Admin can see every reason selected for a timeline report", () => {
   assert.match(reportReasonsMigration, /Spam or scam/);
   assert.match(reportReasonsMigration, /Other inappropriate content/);
 });
+
+test("Reported post removal goes to Activate accounts and Block goes to Blocked accounts", () => {
+  // Remove from active use button on report row and modal
+  assert.match(adminApp, /title=\{self \? "You cannot suspend yourself" : "Remove from active use"\}/);
+  assert.match(adminApp, /title="Remove from active use" onClick=\{\(\) => onRemoveAccount\(report, "account"\)\}/);
+  assert.match(adminApp, /setSection\("removed-accounts"\)/);
+  // Activate accounts has Block button that transitions to Blocked accounts
+  assert.match(adminApp, /resource\.activation \? <button className="danger ops-block-button" onClick=\{\(\) => blockAccount\(row\)\}/);
+  assert.match(adminApp, /const blockAccount = \(row\) => \{/);
+  assert.match(adminApp, /isExplicitBlock[\s\S]*setSection\("blocked-accounts"\)/);
+  // Activate accounts must display all suspended roles, not only travelers
+  assert.doesNotMatch(adminApp, /id: "removed-accounts"[\s\S]*?profileRole:\s*"TRAVELER"/);
+  assert.match(adminApp, /eq\("user_id", report\.reported_post_owner_id\)/);
+  assert.match(adminApp, /table === "profiles" && \(row\.is_admin_only \|\| \(!adminIsSuper && row\.role !== "TRAVELER"\)/);
+  // Resolved reports are removed from default Reports list and removed accounts sort newest first
+  assert.match(adminApp, /const \[reportStatusFilter, setReportStatusFilter\] = useState\("OPEN"\)/);
+  assert.match(adminApp, /target\.id === "removed-accounts"/);
+});
+
+test("Reports submitted by any account against timeline posts show in admin panel report tab", () => {
+  // App submits OPEN status and reopens resolved reports if filed again
+  assert.match(appJsx, /const reportPayload = \{ created_by: user\.id, category: "OTHER", reason_categories: reasons, details: objection, social_post_id: post\.id, status: "OPEN" \};/);
+  assert.match(appJsx, /const reopenPayload = \{[\s\S]*status: "OPEN"[\s\S]*admin_note: null/);
+  // Database migration allows members of any role to report and reopen, and lets admins view timeline reports
+  assert.match(reopenReportsMigration, /function private\.can_report_social_post/);
+  assert.match(reopenReportsMigration, /create policy reports_owner_insert on public\.reports for insert/);
+  assert.match(reopenReportsMigration, /create policy reports_owner_update on public\.reports for update/);
+  assert.match(reopenReportsMigration, /create unique index if not exists reports_social_post_reporter_idx[\s\S]*where social_post_id is not null and status = 'OPEN'/);
+  assert.match(reopenReportsMigration, /function public\.can_view_report/);
+  assert.match(reopenReportsMigration, /report_social_post_id is not null then true/);
+  // Admin panel includes timeline post reports regardless of post author role and listens to realtime changes
+  assert.match(adminApp, /if \(report\.social_post_id\) return true;/);
+  assert.match(adminApp, /channel\("admin-reports-live"\)/);
+  assert.match(adminApp, /on\("postgres_changes", \{ event: "\*", schema: "public", table: "reports" \}/);
+});
+

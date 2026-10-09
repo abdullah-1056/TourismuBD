@@ -594,8 +594,8 @@ function PostCard({ post, user, notify, onUpdated, onDeleted }) {
     if (!reasons.length) { notify("Select at least one reason for this report."); return false; }
     if (objection.length < 10) { notify("Write at least 10 characters explaining your objection."); return false; }
     setSavingReport(true);
-    const reportPayload = { created_by: user.id, category: "OTHER", reason_categories: reasons, details: objection, social_post_id: post.id };
-    const legacyPayload = { created_by: user.id, category: "OTHER", details: `Report reasons: ${reasons.join(" | ")}\n\n${objection}`, social_post_id: post.id };
+    const reportPayload = { created_by: user.id, category: "OTHER", reason_categories: reasons, details: objection, social_post_id: post.id, status: "OPEN" };
+    const legacyPayload = { created_by: user.id, category: "OTHER", details: `Report reasons: ${reasons.join(" | ")}\n\n${objection}`, social_post_id: post.id, status: "OPEN" };
     let payload = reportPayload;
     let { error } = await supabase.from("reports").insert(payload);
     if (error && /reason_categories/i.test(error.message || "")) {
@@ -604,12 +604,31 @@ function PostCard({ post, user, notify, onUpdated, onDeleted }) {
     }
     let updated = false;
     if (error?.code === "23505") {
-      ({ error } = await supabase.from("reports").update(payload).eq("social_post_id", post.id).eq("created_by", user.id).eq("status", "OPEN"));
-      if (error && payload === reportPayload && /reason_categories/i.test(error.message || "")) {
+      let updateResult = await supabase.from("reports").update(payload).eq("social_post_id", post.id).eq("created_by", user.id).eq("status", "OPEN").select("id");
+      if (updateResult.error && payload === reportPayload && /reason_categories/i.test(updateResult.error.message || "")) {
         payload = legacyPayload;
-        ({ error } = await supabase.from("reports").update(payload).eq("social_post_id", post.id).eq("created_by", user.id).eq("status", "OPEN"));
+        updateResult = await supabase.from("reports").update(payload).eq("social_post_id", post.id).eq("created_by", user.id).eq("status", "OPEN").select("id");
       }
-      updated = !error;
+      error = updateResult.error;
+      if (!error && updateResult.data?.length) {
+        updated = true;
+      } else if (!error) {
+        const reopenPayload = {
+          ...payload,
+          status: "OPEN",
+          admin_note: null,
+          resolved_by: null,
+          resolved_at: null,
+          updated_at: new Date().toISOString(),
+        };
+        let reopenResult = await supabase.from("reports").update(reopenPayload).eq("social_post_id", post.id).eq("created_by", user.id).select("id");
+        if (reopenResult.error && payload === reportPayload && /reason_categories/i.test(reopenResult.error.message || "")) {
+          const legacyReopen = { ...legacyPayload, status: "OPEN", admin_note: null, resolved_by: null, resolved_at: null, updated_at: new Date().toISOString() };
+          reopenResult = await supabase.from("reports").update(legacyReopen).eq("social_post_id", post.id).eq("created_by", user.id).select("id");
+        }
+        error = reopenResult.error;
+        updated = !error && Boolean(reopenResult.data?.length);
+      }
     }
     setSavingReport(false);
     if (error) { notify(error.code === "23505" ? "You already reported this update." : error.message); return false; }
