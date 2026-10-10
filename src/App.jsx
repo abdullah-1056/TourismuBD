@@ -120,6 +120,37 @@ const ADMIN_APP_URL = import.meta.env.VITE_ADMIN_APP_URL || (import.meta.env.DEV
 const PROFILE_DETAILS_DEFAULTS = { profile_photo_urls: [], bio: "", district: "", blood_group: "", gender: "", present_address: "", permanent_address: "", working_place: "", hobby: "", phone_edit_count: 0, email_edit_count: 0, followers_visible: true };
 const PROFILE_DETAIL_FIELDS = [["District", "district"], ["Email", "email"], ["Phone number", "phone"], ["Blood group", "blood_group"], ["Gender", "gender"], ["Working place", "working_place"], ["Hobby", "hobby"], ["Present address", "present_address"], ["Permanent address", "permanent_address"]];
 const RESTORABLE_VIEWS = new Set(["home", "feed", "explore", "trip", "services", "people", "shop", "provider", "booking-requests", "traveler", "business", "business-catalog", "account-about", "provider-ratings"]);
+const HIDDEN_POSTS_STORAGE_KEY = "tourismubd.hidden_social_posts";
+
+function getHiddenPostIds() {
+  try {
+    const raw = window.localStorage.getItem(HIDDEN_POSTS_STORAGE_KEY);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    return new Set(Array.isArray(parsed) ? parsed : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function setHiddenSocialPost(postId, hidden = true) {
+  if (!postId) return;
+  try {
+    const existing = getHiddenPostIds();
+    if (hidden) existing.add(postId);
+    else existing.delete(postId);
+    window.localStorage.setItem(HIDDEN_POSTS_STORAGE_KEY, JSON.stringify(Array.from(existing)));
+  } catch { /* ignore storage errors */ }
+}
+
+function isPostHidden(postId, post) {
+  if (post && typeof post.is_hidden === "boolean") {
+    if (!post.is_hidden && postId) setHiddenSocialPost(postId, false);
+    return post.is_hidden;
+  }
+  if (!postId) return false;
+  return getHiddenPostIds().has(postId);
+}
 
 function viewFromLocation() {
   const view = new URLSearchParams(window.location.search).get("view");
@@ -632,6 +663,7 @@ function PostCard({ post, user, notify, onUpdated, onDeleted }) {
     }
     setSavingReport(false);
     if (error) { notify(error.code === "23505" ? "You already reported this update." : error.message); return false; }
+    setHiddenSocialPost(post.id, true);
     setMenuOpen(false);
     notify(updated ? "Your existing report was updated." : "Timeline update reported.");
     return true;
@@ -710,8 +742,13 @@ function DashboardPosts({ user, authorId = user?.id, profile, provider, refreshK
   useEffect(() => {
     if (!user || !authorId) { setState({ loading: false, posts: [], error: "" }); return; }
     let active = true;
-    supabase.from("social_posts").select("id,author_id,body,product_name,media_type,media_path,location_latitude,location_longitude,location_name,created_at").eq("author_id", authorId).order("created_at", { ascending: false }).then(async (result) => {
+    supabase.from("social_posts").select("id,author_id,body,product_name,media_type,media_path,location_latitude,location_longitude,location_name,created_at,is_hidden").eq("author_id", authorId).order("created_at", { ascending: false }).then(async (result) => {
       let { data, error } = result;
+      if (error && /is_hidden/i.test(error.message)) {
+        const retry = await supabase.from("social_posts").select("id,author_id,body,product_name,media_type,media_path,location_latitude,location_longitude,location_name,created_at").eq("author_id", authorId).order("created_at", { ascending: false });
+        data = retry.data;
+        error = retry.error;
+      }
       if (missingProductNameColumn(error)) {
         const fallback = await supabase.from("social_posts").select("id,author_id,body,media_type,media_path,location_latitude,location_longitude,location_name,created_at").eq("author_id", authorId).order("created_at", { ascending: false });
         data = fallback.data;
@@ -723,7 +760,7 @@ function DashboardPosts({ user, authorId = user?.id, profile, provider, refreshK
       if (!active) return;
       if (media.error) return setState({ loading: false, posts: [], error: media.error.message });
       const mediaUrls = Object.fromEntries((media.data || []).map((item) => [item.path, item.signedUrl]));
-      const posts = data.map((post) => ({ ...post, author: { full_name: provider?.display_name || profile.full_name, role: profile.role, avatar_url: profile.avatar_url || provider?.photo_url }, media_url: mediaUrls[post.media_path] })).filter((post) => post.media_url);
+      const posts = data.filter((post) => !isPostHidden(post.id, post)).map((post) => ({ ...post, author: { full_name: provider?.display_name || profile.full_name, role: profile.role, avatar_url: profile.avatar_url || provider?.photo_url }, media_url: mediaUrls[post.media_path] })).filter((post) => post.media_url);
       const postsWithEngagement = await addPostEngagement(posts);
       if (active) setState({ loading: false, posts: postsWithEngagement, error: "" });
     });
@@ -742,8 +779,13 @@ function CommunityFeed({ user, notify }) {
   useEffect(() => {
     if (!user) return setState({ loading: false, posts: [], error: "Sign in to view posts." });
     let active = true;
-    supabase.from("social_posts").select("id,author_id,body,product_name,media_type,media_path,video_duration_seconds,location_latitude,location_longitude,location_name,created_at").order("created_at", { ascending: false }).limit(50).then(async (result) => {
+    supabase.from("social_posts").select("id,author_id,body,product_name,media_type,media_path,video_duration_seconds,location_latitude,location_longitude,location_name,created_at,is_hidden").order("created_at", { ascending: false }).limit(50).then(async (result) => {
       let { data, error } = result;
+      if (error && /is_hidden/i.test(error.message)) {
+        const retry = await supabase.from("social_posts").select("id,author_id,body,product_name,media_type,media_path,video_duration_seconds,location_latitude,location_longitude,location_name,created_at").order("created_at", { ascending: false }).limit(50);
+        data = retry.data;
+        error = retry.error;
+      }
       if (missingProductNameColumn(error)) {
         const fallback = await supabase.from("social_posts").select("id,author_id,body,media_type,media_path,video_duration_seconds,location_latitude,location_longitude,location_name,created_at").order("created_at", { ascending: false }).limit(50);
         data = fallback.data;
@@ -759,7 +801,7 @@ function CommunityFeed({ user, notify }) {
       if (people.error) return setState({ loading: false, posts: [], error: people.error.message });
       const authors = Object.fromEntries((people.data || []).map((person) => [person.id, person]));
       const mediaUrls = Object.fromEntries((media.data || []).map((item) => [item.path, item.signedUrl]));
-      const posts = (data || []).map((post) => ({ ...post, author: authors[post.author_id], media_url: mediaUrls[post.media_path] })).filter((post) => post.author && post.media_url);
+      const posts = (data || []).filter((post) => !isPostHidden(post.id, post)).map((post) => ({ ...post, author: authors[post.author_id] || { full_name: "TourismuBD member", role: "TRAVELER" }, media_url: mediaUrls[post.media_path] })).filter((post) => post.author && post.media_url);
       const postsWithEngagement = await addPostEngagement(posts);
       if (active) setState({ loading: false, posts: postsWithEngagement, error: media.error?.message || "" });
     });
@@ -1309,10 +1351,14 @@ function Marketplace({ query, setQuery }) {
     let active = true;
     const load = async () => {
       try {
-        const [catalogResult, postResult] = await Promise.all([
+        const [catalogResult, initialPostResult] = await Promise.all([
           supabase.from("business_products").select("id,name,description,price_bdt,stock_quantity,image_url,created_at,businesses!inner(business_name,district,contact_email,contact_phone)").eq("status", "PUBLISHED").order("created_at", { ascending: false }),
-          supabase.from("social_posts").select("id,author_id,product_name,body,media_type,media_path,created_at").not("product_name", "is", null).order("created_at", { ascending: false }),
+          supabase.from("social_posts").select("id,author_id,product_name,body,media_type,media_path,created_at,is_hidden").not("product_name", "is", null).order("created_at", { ascending: false }),
         ]);
+        let postResult = initialPostResult;
+        if (postResult.error && /is_hidden/i.test(postResult.error.message)) {
+          postResult = await supabase.from("social_posts").select("id,author_id,product_name,body,media_type,media_path,created_at").not("product_name", "is", null).order("created_at", { ascending: false });
+        }
         if (!active) return;
         const catalog = (catalogResult.data || []).map((product) => ({ ...product, kind: "LISTING" }));
         const namedPosts = postResult.data || [];
@@ -1324,7 +1370,7 @@ function Marketplace({ query, setQuery }) {
         if (!active) return;
         const businesses = Object.fromEntries((businessResult.data || []).map((business) => [business.user_id, business]));
         const mediaUrls = Object.fromEntries((mediaResult.data || []).map((item) => [item.path, item.signedUrl]));
-        const productPosts = namedPosts.map((post) => ({ id: post.id, kind: "POST", name: post.product_name, description: post.body, image_url: mediaUrls[post.media_path], media_type: post.media_type, created_at: post.created_at, businesses: businesses[post.author_id] })).filter((post) => post.businesses && post.image_url);
+        const productPosts = namedPosts.filter((post) => !isPostHidden(post.id, post)).map((post) => ({ id: post.id, kind: "POST", name: post.product_name, description: post.body, image_url: mediaUrls[post.media_path], media_type: post.media_type, created_at: post.created_at, businesses: businesses[post.author_id] })).filter((post) => post.businesses && post.image_url);
         setState({
           loading: false,
           products: combineShopProducts(catalog, productPosts),
@@ -2439,6 +2485,18 @@ export default function App() {
   const [theme, setTheme] = useState(() => localStorage.getItem("tourismubd.theme") === "dark" ? "dark" : "light");
   const pendingAuthActionRef = useRef(null);
   const serviceDistrict = districts.find((district) => district.id === serviceDistrictId) || null;
+
+  useEffect(() => {
+    if (!supabase) return;
+    supabase.rpc("get_reported_social_post_ids").then(({ data }) => {
+      if (Array.isArray(data)) {
+        const activeHiddenIds = new Set(data.map((row) => row.post_id || row).filter(Boolean));
+        try {
+          window.localStorage.setItem(HIDDEN_POSTS_STORAGE_KEY, JSON.stringify([...activeHiddenIds]));
+        } catch { /* ignore storage errors */ }
+      }
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     updateBrowserView(view, true);

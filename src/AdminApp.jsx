@@ -38,7 +38,7 @@ import {
   Waves,
   X,
 } from "lucide-react";
-import { ADMIN_ROLES, ADMIN_ROLE_LABELS, adminRemovalPatch, buildPlacePayload, canAccessAdminSection, canManageProfile, hasAdminAccess, isSuperAdmin, PLACE_STATUSES, providerTypeLabel, slugifyPlaceName, sortDestinationRows } from "./lib/admin.js";
+import { ADMIN_ROLES, ADMIN_ROLE_LABELS, adminRemovalPatch, buildPlacePayload, canAccessAdminSection, canManageProfile, groupReportedPostRows, hasAdminAccess, isSuperAdmin, PLACE_STATUSES, providerTypeLabel, slugifyPlaceName, sortDestinationRows } from "./lib/admin.js";
 import { supabase } from "./lib/admin-supabase.js";
 
 const RESOURCES = [
@@ -61,8 +61,8 @@ const RESOURCES = [
   { id: "bookings", label: "Bookings", table: "bookings", adminModule: "bookings", icon: CalendarCheck, columns: ["service_type", "service_name", "provider_name", "traveler_names", "booking_count", "latest_booking", "status"] },
   { id: "trips", label: "Saved trips", table: "saved_trips", icon: CarFront, columns: ["name", "traveler_id", "starting_point_value", "created_at"] },
   { id: "reviews", label: "Reviews", table: "reviews", icon: Star, columns: ["booking_id", "rating", "status", "created_at"], remove: { status: "REMOVED" } },
-  { id: "reports", label: "Reports", table: "reports", adminModule: "reports", reportSection: true, icon: AlertTriangle, columns: ["category", "reason_categories", "status", "reported_post_owner", "reported_post_owner_id", "reported_post", "updated_at"], remove: "resolve" },
-  { id: "removed-accounts", label: "Activate users", table: "profiles", adminModule: "users", publicProfilesOnly: true, profileStatus: "SUSPENDED", reportSection: true, reportChild: true, activation: true, icon: BadgeCheck, columns: ["full_name", "email", "role", "district", "status", "updated_at"], remove: { status: "ACTIVE" }, noDelete: true, deleteReason: "Use the activation action to restore this user account." },
+  { id: "reports", label: "Reports", table: "reports", primaryKey: "_row_key", adminModule: "reports", reportSection: true, icon: AlertTriangle, columns: ["category", "reason_categories", "status", "reported_post_owner", "reported_post_owner_id", "reported_post", "reports_count", "updated_at"], remove: "resolve" },
+  { id: "removed-accounts", label: "Activate post", table: "profiles", adminModule: "users", publicProfilesOnly: true, profileStatus: "SUSPENDED", reportSection: true, reportChild: true, activation: true, icon: BadgeCheck, columns: ["reported_post", "full_name", "email", "role", "district", "status", "updated_at"], remove: { status: "ACTIVE" }, noDelete: true, deleteReason: "Use the activation action to restore this user account." },
   { id: "removed-providers", label: "Activate providers", table: "providers", adminModule: "providers", accountStatus: "REMOVED", reportSection: true, reportChild: true, activation: true, icon: BadgeCheck, columns: ["owner_name", "provider_type", "district", "contact_email", "account_status", "public_status"], remove: { account_status: "ACTIVE", public_status: "PUBLISHED" }, noDelete: true, deleteReason: "Use the activation action to restore this provider account." },
   { id: "removed-businesses", label: "Activate businesses", table: "businesses", adminModule: "business", businessSection: true, accountStatus: "REMOVED", reportSection: true, reportChild: true, activation: true, icon: BadgeCheck, columns: ["owner_name", "business_name", "district", "contact_email", "account_status", "public_status"], remove: { account_status: "ACTIVE", public_status: "PUBLISHED" }, noDelete: true, deleteReason: "Use the activation action to restore this business account." },
   { id: "frozen-subscriptions", label: "Activate subscriptions", table: "provider_subscriptions", adminModule: "subscriptions", subscriptionSection: true, subscriptionStatus: "FROZEN", reportSection: true, reportChild: true, activation: true, icon: BadgeCheck, columns: ["owner_name", "service_name", "provider_type", "district", "status", "current_period_end"], remove: { status: "ACTIVE" }, noDelete: true, deleteReason: "Use the activation action to restore this subscription." },
@@ -91,9 +91,9 @@ const ADMIN_AUTH_BYPASS = import.meta.env.DEV && import.meta.env.VITE_ADMIN_AUTH
 const LOCAL_ADMIN_TABLES = new Set(["profiles", "providers", "businesses", "business_products", "places", "place_relationships", "water_bodies", "provider_verifications", "provider_subscriptions", "guide_profiles", "houseboat_listings", "small_boat_listings", "bookings", "saved_trips", "reviews", "reports", "social_posts", "admin_actions", "admin_accounts"]);
 const LOCAL_ADMIN_MUTABLE_TABLES = new Set(["profiles", "providers", "businesses", "business_products", "places", "place_relationships", "water_bodies", "provider_subscriptions", "bookings", "saved_trips", "reviews", "reports", "social_posts"]);
 const ADMIN_EDITABLE_FIELDS = {
-  profiles: new Set(["full_name", "email", "phone", "bio", "blood_group", "gender", "district", "working_place", "hobby", "present_address", "permanent_address", "avatar_url", "profile_photo_urls", "status"]),
-  providers: new Set(["display_name", "service_name", "bio", "photo_url", "contact_email", "contact_phone", "account_status", "public_status"]),
-  businesses: new Set(["business_name", "description", "district", "contact_email", "contact_phone", "account_status", "public_status"]),
+  profiles: new Set(["full_name", "email", "phone", "bio", "blood_group", "gender", "district", "working_place", "hobby", "present_address", "permanent_address", "avatar_url", "profile_photo_urls", "status", "is_blocked"]),
+  providers: new Set(["display_name", "service_name", "bio", "photo_url", "contact_email", "contact_phone", "account_status", "public_status", "is_blocked"]),
+  businesses: new Set(["business_name", "description", "district", "contact_email", "contact_phone", "account_status", "public_status", "is_blocked"]),
   business_products: new Set(["name", "description", "price_bdt", "stock_quantity", "image_url", "status"]),
   places: new Set(["district_id", "name", "slug", "upazila_or_area", "category", "latitude", "longitude", "short_description", "best_time", "how_to_reach", "practical_tips", "image_url", "status"]),
   place_relationships: new Set(["relationship_type", "travel_minutes"]),
@@ -103,8 +103,72 @@ const ADMIN_EDITABLE_FIELDS = {
   saved_trips: new Set(["name"]),
   reviews: new Set(["status"]),
   reports: new Set(["status", "admin_note", "resolved_by", "resolved_at", "social_post_id"]),
+  social_posts: new Set(["is_hidden"]),
 };
 const ADMIN_SECTION_STORAGE_KEY = "tourismubd.admin.section";
+const EXPLICIT_BLOCKED_STORAGE_KEY = "tourismubd.admin.explicit_blocked_accounts";
+const HIDDEN_POSTS_STORAGE_KEY = "tourismubd.hidden_social_posts";
+
+function getHiddenPostIds() {
+  try {
+    const raw = window.localStorage.getItem(HIDDEN_POSTS_STORAGE_KEY);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    return new Set(Array.isArray(parsed) ? parsed : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function setHiddenSocialPost(postId, hidden = true) {
+  if (!postId) return;
+  try {
+    const ids = getHiddenPostIds();
+    if (hidden) ids.add(postId);
+    else ids.delete(postId);
+    window.localStorage.setItem(HIDDEN_POSTS_STORAGE_KEY, JSON.stringify([...ids]));
+  } catch {
+    // localStorage may be restricted
+  }
+}
+
+function isPostHidden(postId, post) {
+  if (post && typeof post.is_hidden === "boolean") return post.is_hidden;
+  if (!postId) return false;
+  return getHiddenPostIds().has(postId);
+}
+
+function getExplicitBlockedAccountMap() {
+  try {
+    const raw = window.localStorage.getItem(EXPLICIT_BLOCKED_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function setExplicitBlockedAccount(id, isBlocked) {
+  if (!id) return;
+  try {
+    const map = getExplicitBlockedAccountMap();
+    map[id] = Boolean(isBlocked);
+    window.localStorage.setItem(EXPLICIT_BLOCKED_STORAGE_KEY, JSON.stringify(map));
+  } catch {
+    // localStorage may be unavailable in some environments
+  }
+}
+
+function isAccountExplicitlyBlocked(row, table) {
+  if (!row) return false;
+  const map = getExplicitBlockedAccountMap();
+  const id = row.id || (table && row._row_key ? row._row_key.replace(`${table}:`, "") : null);
+  if (id && typeof map[id] === "boolean") {
+    return map[id];
+  }
+  return Boolean(row.is_blocked);
+}
 
 function isAdminSection(section) {
   return section === "overview" || section === "admin-management" || RESOURCES.some((resource) => resource.id === section);
@@ -523,7 +587,9 @@ function PlaceEditor({ row, districts, bypassAuth, onClose, onSaved }) {
 
 function DeleteRecordDialog({ resource, row, onClose, onConfirm }) {
   const dialogRef = useRef(null);
-  const recordName = row.name || row.display_name || row.full_name || row.business_name || row.id;
+  const recordName = row._is_post
+    ? (row.reported_post ? (row.reported_post.length > 50 ? `${row.reported_post.slice(0, 47)}...` : row.reported_post) : row.id)
+    : (row.name || row.display_name || row.full_name || row.business_name || row.id);
   useEffect(() => { dialogRef.current?.showModal(); }, []);
   return <dialog ref={dialogRef} className="ops-dialog" onCancel={onClose}>
     <section className="ops-editor">
@@ -541,16 +607,30 @@ function AccountActionDialog({ resource, row, onClose, onConfirm }) {
   const isExplicitBlock = Boolean(row._forceBlock);
   const restoring = !isExplicitBlock && (Boolean(resource.activation) || resource.id === "blocked-accounts");
   const blocking = isExplicitBlock || (!restoring && (resource.id === "profiles" || resource.table === "providers" || resource.businessSection));
-  const recordName = row.owner_name || row.display_name || row.full_name || row.business_name || row.id;
+  const recordName = isExplicitBlock && (row._is_post || row.reported_post_owner_id)
+    ? (row.reported_post_owner || row.full_name || row.owner_name || "member")
+    : row._is_post
+      ? (row.reported_post ? (row.reported_post.length > 50 ? `${row.reported_post.slice(0, 47)}...` : row.reported_post) : row.id)
+      : (row.owner_name || row.display_name || row.full_name || row.business_name || row.id);
   const action = restoring ? "Activate" : blocking ? "Block" : resource.id === "reports" ? "Resolve" : "Remove";
+  const entityType = isExplicitBlock ? "account" : row._is_post ? "post" : "account";
   useEffect(() => { dialogRef.current?.showModal(); }, []);
   return <dialog ref={dialogRef} className="ops-dialog" onCancel={onClose}>
     <section className="ops-editor">
       <button type="button" className="ops-icon-button ops-close" onClick={onClose} aria-label="Close account action"><X /></button>
-      <p className="ops-kicker">Account action</p>
-      <h2>{action} account?</h2>
-      <p>{restoring ? <>Restore <b>{recordName}</b> and its linked services to active use?</> : isExplicitBlock ? <>Move <b>{recordName}</b> to Blocked accounts?</> : blocking ? <>Move <b>{recordName}</b> to Activate accounts?</> : <>Apply this action to <b>{recordName}</b>?</>}</p>
-      <div className="ops-dialog-actions"><button type="button" className="ops-button secondary" onClick={onClose}>Cancel</button><button type="button" className={restoring ? "ops-button" : "ops-button danger"} onClick={() => onConfirm(row)}><Archive />{action} account</button></div>
+      <p className="ops-kicker">{isExplicitBlock ? "Account action" : row._is_post ? "Post action" : "Account action"}</p>
+      <h2>{action} {entityType}?</h2>
+      <p>{restoring
+        ? row._is_post
+          ? <>Restore this post by <b>{row.full_name || "member"}</b> to active use?</>
+          : <>Restore <b>{recordName}</b> and its linked services to active use?</>
+        : isExplicitBlock
+          ? <>Move <b>{recordName}</b> to Blocked accounts?</>
+          : blocking
+            ? <>Move <b>{recordName}</b> to Activate accounts?</>
+            : <>Apply this action to <b>{recordName}</b>?</>
+      }</p>
+      <div className="ops-dialog-actions"><button type="button" className="ops-button secondary" onClick={onClose}>Cancel</button><button type="button" className={restoring ? "ops-button" : "ops-button danger"} onClick={() => onConfirm(row)}>{isExplicitBlock ? <ShieldAlert /> : <Archive />}{action} {entityType}</button></div>
     </section>
   </dialog>;
 }
@@ -558,7 +638,8 @@ function AccountActionDialog({ resource, row, onClose, onConfirm }) {
 function ReportAccountRemovalDialog({ report, onClose, onConfirm }) {
   const dialogRef = useRef(null);
   const accountName = report.reported_post_owner || "this account";
-  const target = report.admin_action_target || "account";
+  const target = report.admin_action_target || (report.social_post_id ? "post" : "account");
+  const isPostTarget = target === "post";
   const providerTarget = target === "provider";
   const subscriptionTarget = target === "subscription";
   const bookingTarget = target === "booking";
@@ -568,9 +649,9 @@ function ReportAccountRemovalDialog({ report, onClose, onConfirm }) {
     <section className="ops-editor">
       <button type="button" className="ops-icon-button ops-close" onClick={onClose} aria-label="Close account removal confirmation"><X /></button>
       <p className="ops-kicker">Report action</p>
-      <h2>{bookingTarget ? "Cancel booking?" : subscriptionTarget ? "Freeze subscription?" : providerTarget ? "Remove provider?" : businessTarget ? "Remove business?" : "Remove account?"}</h2>
-      <p>{bookingTarget ? <>Cancel booking <b>{report.reported_booking_record?.id}</b>. The report will be marked resolved, and booking history will be retained.</> : subscriptionTarget ? <>Freeze <b>{report.reported_subscription_record?.service_name || accountName}</b> and keep it available in Activate subscriptions. The provider account will remain active. The report will be marked resolved.</> : providerTarget ? <>Move <b>{accountName}</b> out of active use and hide it from public search. It will remain available in Activate providers. The report will be marked resolved.</> : businessTarget ? <>Move <b>{report.reported_business_record?.business_name || accountName}</b> out of active use and hide it from public search. The owner’s login will remain intact, and the business will be available in Activate businesses. The report will be marked resolved.</> : <>Suspend <b>{accountName}</b>, hide the account from public search, and keep it available for later activation. The report will be marked resolved.</>}</p>
-      <div className="ops-dialog-actions"><button type="button" className="ops-button secondary" onClick={onClose}>Cancel</button><button type="button" className="ops-button danger" onClick={() => onConfirm(report)}><Archive />{bookingTarget ? "Cancel booking" : subscriptionTarget ? "Freeze subscription" : providerTarget ? "Remove provider" : businessTarget ? "Remove business" : "Remove account"}</button></div>
+      <h2>{isPostTarget ? "Remove post from active use?" : bookingTarget ? "Cancel booking?" : subscriptionTarget ? "Freeze subscription?" : providerTarget ? "Remove provider?" : businessTarget ? "Remove business?" : "Remove account?"}</h2>
+      <p>{isPostTarget ? <>Remove this post by <b>{accountName}</b> from active use and hide it from user feeds. It will move to the Activate Post Page, and its report history will remain preserved.</> : bookingTarget ? <>Cancel booking <b>{report.reported_booking_record?.id}</b>. The report will be marked resolved, and booking history will be retained.</> : subscriptionTarget ? <>Freeze <b>{report.reported_subscription_record?.service_name || accountName}</b> and keep it available in Activate subscriptions. The provider account will remain active. The report will be marked resolved.</> : providerTarget ? <>Move <b>{accountName}</b> out of active use and hide it from public search. It will remain available in Activate providers. The report will be marked resolved.</> : businessTarget ? <>Move <b>{report.reported_business_record?.business_name || accountName}</b> out of active use and hide it from public search. The owner’s login will remain intact, and the business will be available in Activate businesses. The report will be marked resolved.</> : <>Suspend <b>{accountName}</b>, hide the account from public search, and keep it available for later activation. The report will be marked resolved.</>}</p>
+      <div className="ops-dialog-actions"><button type="button" className="ops-button secondary" onClick={onClose}>Cancel</button><button type="button" className="ops-button danger" onClick={() => onConfirm(report)}><Archive />{isPostTarget ? "Remove post" : bookingTarget ? "Cancel booking" : subscriptionTarget ? "Freeze subscription" : providerTarget ? "Remove provider" : businessTarget ? "Remove business" : "Remove account"}</button></div>
     </section>
   </dialog>;
 }
@@ -611,21 +692,106 @@ function BookingHistoryDialog({ provider, onClose, onCancelBooking }) {
   </dialog>;
 }
 
-function ReportedPostDialog({ report, onClose }) {
+function ReportedPostDialog({ report, onClose, bypassAuth = false }) {
   const dialogRef = useRef(null);
-  const post = report.reported_post_record;
+  const initialPost = report.reported_post_record || null;
+  const [postRecord, setPostRecord] = useState(initialPost);
+  const [mediaUrl, setMediaUrl] = useState(initialPost?.media_url || report.media_url || "");
+  const [loadingMedia, setLoadingMedia] = useState(!initialPost?.media_url && !report.media_url && Boolean(initialPost?.media_path || report.social_post_id));
+
   useEffect(() => { dialogRef.current?.showModal(); }, []);
+
+  useEffect(() => {
+    let active = true;
+    const currentPost = postRecord || report.reported_post_record;
+    if (currentPost?.media_url) {
+      setMediaUrl(currentPost.media_url);
+      setLoadingMedia(false);
+      return;
+    }
+    const path = currentPost?.media_path;
+    if (path) {
+      const fetchUrl = async () => {
+        try {
+          if (bypassAuth) {
+            const response = await fetch(`/__tourismubd-admin/post-media?path=${encodeURIComponent(path)}`);
+            const payload = await response.json();
+            if (active && response.ok && payload.url) setMediaUrl(payload.url);
+          } else {
+            const { data } = await supabase.storage.from("social-posts").createSignedUrl(path, 3600);
+            if (active && data?.signedUrl) setMediaUrl(data.signedUrl);
+          }
+        } catch {}
+        finally {
+          if (active) setLoadingMedia(false);
+        }
+      };
+      fetchUrl();
+      return;
+    }
+    if (!currentPost && report.social_post_id) {
+      const fetchPostAndMedia = async () => {
+        try {
+          let loadedPost = null;
+          if (bypassAuth) {
+            const posts = await loadLocalAdminTable("social_posts", { limit: 1, filter: "id", value: report.social_post_id });
+            loadedPost = posts?.[0] || null;
+          } else {
+            const { data } = await supabase.from("social_posts").select("id,author_id,body,product_name,media_type,media_path,location_name,created_at,is_hidden").eq("id", report.social_post_id).maybeSingle();
+            loadedPost = data || null;
+          }
+          if (!active) return;
+          if (loadedPost) {
+            setPostRecord(loadedPost);
+            if (loadedPost.media_path) {
+              if (bypassAuth) {
+                const response = await fetch(`/__tourismubd-admin/post-media?path=${encodeURIComponent(loadedPost.media_path)}`);
+                const payload = await response.json();
+                if (active && response.ok && payload.url) setMediaUrl(payload.url);
+              } else {
+                const { data: signData } = await supabase.storage.from("social-posts").createSignedUrl(loadedPost.media_path, 3600);
+                if (active && signData?.signedUrl) setMediaUrl(signData.signedUrl);
+              }
+            }
+          }
+        } catch {}
+        finally {
+          if (active) setLoadingMedia(false);
+        }
+      };
+      fetchPostAndMedia();
+      return;
+    }
+    setLoadingMedia(false);
+    return () => { active = false; };
+  }, [bypassAuth, postRecord, report.reported_post_record, report.social_post_id]);
+
+  const post = postRecord || report.reported_post_record;
+  const activeMediaUrl = mediaUrl || post?.media_url;
+
   return <dialog ref={dialogRef} className="ops-dialog ops-provider-dialog" onCancel={onClose}>
     <section className="ops-provider-profile">
       <button type="button" className="ops-icon-button ops-close" onClick={onClose} aria-label="Close reported post"><X /></button>
       <header className="ops-provider-header"><div className="ops-provider-avatar"><AlertTriangle /></div><div><p className="ops-kicker">Reported timeline update</p><h2>{report.reported_post_owner || "TourismuBD member"}</h2><p>{post?.created_at ? new Date(post.created_at).toLocaleString() : "Date not available"}</p></div></header>
-      <section className="ops-profile-section"><h3>Post content</h3>{post?.product_name ? <p className="ops-reported-post-product">{post.product_name}</p> : null}<p className="ops-reported-post-body">{post?.body || "This timeline post is no longer available."}</p>{post?.location_name ? <p className="ops-reported-post-location"><MapPin />{post.location_name}</p> : null}{post?.media_url ? post.media_type === "VIDEO" ? <video className="ops-reported-post-media" controls preload="metadata" src={post.media_url} /> : <img className="ops-reported-post-media" src={post.media_url} alt="Reported post attachment" /> : null}</section>
+      <section className="ops-profile-section">
+        <h3>Post content</h3>
+        {post?.product_name ? <p className="ops-reported-post-product">{post.product_name}</p> : null}
+        <p className="ops-reported-post-body">{post?.body || "This timeline post is no longer available."}</p>
+        {post?.location_name ? <p className="ops-reported-post-location"><MapPin />{post.location_name}</p> : null}
+        {activeMediaUrl ? (
+          post?.media_type === "VIDEO"
+            ? <video className="ops-reported-post-media" controls preload="metadata" src={activeMediaUrl} />
+            : <img className="ops-reported-post-media" src={activeMediaUrl} alt="Reported post attachment" />
+        ) : loadingMedia ? (
+          <p className="people-note">Loading attachment...</p>
+        ) : null}
+      </section>
       <section className="ops-profile-section"><h3>Post record</h3><div className="ops-profile-grid"><ProfileField label="Post ID" value={report.social_post_id} wide /><ProfileField label="Post owner ID" value={report.reported_post_owner_id} wide /></div></section>
     </section>
   </dialog>;
 }
 
-function ReportDetailsDialog({ report, readOnly = false, canDeletePost = false, canRemoveAccount = false, canRemoveProvider = false, canRemoveBusiness = false, canFreezeSubscription = false, canCancelBooking = false, onClose, onViewProfile, onViewProvider, onViewPost, onLinkPost, onDeletePost, onRemoveAccount }) {
+function ReportDetailsDialog({ report, readOnly = false, canDeletePost = false, canRemoveAccount = false, canRemoveProvider = false, canRemoveBusiness = false, canFreezeSubscription = false, canCancelBooking = false, onClose, onViewProfile, onViewProvider, onViewPost, onLinkPost, onDeletePost, onRemoveAccount, onActivatePost, onBlockAccount }) {
   const dialogRef = useRef(null);
   const selectedReasons = reportReasons(report);
   useEffect(() => { dialogRef.current?.showModal(); }, []);
@@ -640,6 +806,7 @@ function ReportDetailsDialog({ report, readOnly = false, canDeletePost = false, 
       <section className="ops-profile-section"><h3>Report details</h3><div className="ops-profile-grid">
         <ProfileField label="Category" value={report.category?.replaceAll("_", " ")} />
         <ProfileField label="Status" value={report.status} />
+        {report.report_count > 1 ? <ProfileField label="Total reports" value={`${report.report_count} reports filed against this post`} /> : null}
         <ProfileField label="Reported by" value={report.created_by} />
         <ProfileField label="First submitted" value={report.created_at ? new Date(report.created_at).toLocaleString() : null} />
         <ProfileField label="Last updated" value={report.updated_at ? new Date(report.updated_at).toLocaleString() : null} />
@@ -650,6 +817,7 @@ function ReportDetailsDialog({ report, readOnly = false, canDeletePost = false, 
         <ProfileField label="Reported post" value={report.reported_post} wide />
       </div></section>
       <section className="ops-profile-section"><h3>Linked records</h3><div className="ops-profile-grid">
+        {report.social_post_id ? <ProfileField label="Post ID" value={report.social_post_id} wide /> : null}
         <ProfileField label="Provider ID" value={report.provider_id} />
         {report.reported_business_record ? <><ProfileField label="Business" value={report.reported_business_record.business_name} /><ProfileField label="Business status" value={report.reported_business_record.account_status} /></> : null}
         {report.reported_subscription_record ? <><ProfileField label="Subscription status" value={report.reported_subscription_record.status} /><ProfileField label="Subscription period ends" value={report.reported_subscription_record.current_period_end} /></> : null}
@@ -668,8 +836,9 @@ function ReportDetailsDialog({ report, readOnly = false, canDeletePost = false, 
         {report.reported_post_owner_profile ? <button type="button" className="ops-button secondary" onClick={() => onViewProfile(report.reported_post_owner_profile)}><Eye />View account details</button> : null}
         {report.reported_provider_record ? <button type="button" className="ops-button secondary" onClick={() => onViewProvider(report.reported_provider_record)}><Eye />View provider details</button> : null}
         {report.social_post_id ? <button type="button" className="ops-button secondary" onClick={() => onViewPost(report)}><Eye />View reported post</button> : null}
-        {canDeletePost && report.social_post_id ? <button type="button" className="ops-button secondary" onClick={() => onDeletePost(report)}><Trash2 />Delete post</button> : null}
-        {canRemoveAccount && report.reported_post_owner_id ? <button type="button" className="ops-button danger" title="Remove from active use" onClick={() => onRemoveAccount(report, "account")}><Archive />Remove account</button> : null}
+        {canDeletePost && report.social_post_id && !report._is_post ? <button type="button" className="ops-button secondary" onClick={() => onDeletePost(report)}><Trash2 />Delete post</button> : null}
+        {report._is_post && onActivatePost ? <button type="button" className="ops-button" title="Activate post" onClick={() => onActivatePost(report)}><Archive />Activate post</button> : report.social_post_id ? <button type="button" className="ops-button danger" title="Remove post from active use" onClick={() => onRemoveAccount(report, "post")}><Archive />Remove from active use</button> : null}
+        {(report._is_post || report.reported_post_owner_id) && onBlockAccount ? <button type="button" className="ops-button danger ops-block-button" title="Block account" onClick={() => onBlockAccount(report)}><ShieldAlert />Block account</button> : null}
         {canRemoveProvider && report.reported_provider_record ? <button type="button" className="ops-button danger" onClick={() => onRemoveAccount(report, "provider")}><Archive />Remove provider</button> : null}
         {canRemoveBusiness && report.reported_business_record ? <button type="button" className="ops-button danger" onClick={() => onRemoveAccount(report, "business")}><Archive />Remove business</button> : null}
         {canFreezeSubscription && report.reported_subscription_record ? <button type="button" className="ops-button danger" onClick={() => onRemoveAccount(report, "subscription")}><Archive />Freeze subscription</button> : null}
@@ -1169,6 +1338,7 @@ function Operations({ user, profile, access, onSignOut, onAccessLost, bypassAuth
           if (table === "profiles" && (row.is_admin_only || (!adminIsSuper && row.role !== "TRAVELER") || row.status !== "SUSPENDED")) continue;
           if (table === "providers" && row.account_status !== "REMOVED") continue;
           if (table === "businesses" && row.account_status !== "REMOVED") continue;
+          if (!isAccountExplicitlyBlocked(row, table)) continue;
           blockedRows.push({
             ...row,
             _blocked_table: table,
@@ -1191,7 +1361,7 @@ function Operations({ user, profile, access, onSignOut, onAccessLost, bypassAuth
         result = { data: null, error: localError };
       }
     } else {
-      let request = supabase.from(target.table).select(target.id === "places" ? "*,districts(name,division,slug)" : "*").limit(target.id === "places" ? 1000 : 100);
+      let request = supabase.from(target.table).select(target.id === "places" ? "*,districts(name,division,slug)" : "*").limit(["places", "reports"].includes(target.id) ? 1000 : 100);
       if (target.providerType) request = request.eq("type", target.providerType);
       if (target.profileRole) request = request.eq("role", target.profileRole);
       if (target.publicProfilesOnly) request = request.eq("is_admin_only", false);
@@ -1211,6 +1381,7 @@ function Operations({ user, profile, access, onSignOut, onAccessLost, bypassAuth
     const resultRows = (result.data || []).filter((row) => {
       if (target.id === "blocked-accounts") return true;
       if (target.id === "reports") return true;
+      if (target.activation && isAccountExplicitlyBlocked(row, target.table)) return false;
       if (target.id === "profiles") return (target.profileStatus ? row.status === target.profileStatus : row.status !== "SUSPENDED") && (!target.publicProfilesOnly || !row.is_admin_only);
       if (target.table === "providers" || target.table === "businesses") return target.accountStatus ? row.account_status === target.accountStatus : row.account_status !== "REMOVED";
       if (target.table === "provider_subscriptions" && target.subscriptionStatus) return row.status === target.subscriptionStatus;
@@ -1227,16 +1398,43 @@ function Operations({ user, profile, access, onSignOut, onAccessLost, bypassAuth
       const postIds = [...new Set(nextRows.map((row) => row.social_post_id).filter(Boolean))];
       const providerIds = [...new Set(nextRows.map((row) => row.provider_id).filter(Boolean))];
       let postResult;
+      let reportCountsByPostId = {};
       if (bypassAuth) {
-        try { postResult = { data: await loadLocalAdminTable("social_posts", { limit: 500, ids: postIds }), error: null }; }
-        catch (localError) { postResult = { data: [], error: localError }; }
+        try {
+          const [postsData, allReportsData] = await Promise.all([
+            loadLocalAdminTable("social_posts", { limit: 500, ids: postIds }),
+            loadLocalAdminTable("reports", { limit: 1000 }),
+          ]);
+          postResult = { data: postsData, error: null };
+          for (const r of (allReportsData || [])) {
+            if (r.social_post_id && postIds.includes(r.social_post_id)) {
+              reportCountsByPostId[r.social_post_id] = (reportCountsByPostId[r.social_post_id] || 0) + 1;
+            }
+          }
+        } catch (localError) { postResult = { data: [], error: localError }; }
       } else {
-        postResult = postIds.length ? await supabase.from("social_posts").select("id,author_id,body,product_name,media_type,media_path,location_name,created_at").in("id", postIds) : { data: [], error: null };
+        const postQuery = postIds.length ? supabase.from("social_posts").select("id,author_id,body,product_name,media_type,media_path,location_name,created_at,is_hidden").in("id", postIds) : Promise.resolve({ data: [], error: null });
+        const countQuery = postIds.length ? supabase.from("reports").select("id,social_post_id").in("social_post_id", postIds).limit(1000) : Promise.resolve({ data: [], error: null });
+        const [postsResponse, countsResponse] = await Promise.all([postQuery, countQuery]);
+        postResult = postsResponse;
         if (postResult.error && /product_name/i.test(postResult.error.message)) {
-          postResult = postIds.length ? await supabase.from("social_posts").select("id,author_id,body,media_type,media_path,location_name,created_at").in("id", postIds) : { data: [], error: null };
+          postResult = postIds.length ? await supabase.from("social_posts").select("id,author_id,body,media_type,media_path,location_name,created_at,is_hidden").in("id", postIds) : { data: [], error: null };
         }
         if (postResult.error) {
           postResult = { data: [], error: null };
+        }
+        if (Array.isArray(countsResponse?.data)) {
+          for (const r of countsResponse.data) {
+            if (r.social_post_id) {
+              reportCountsByPostId[r.social_post_id] = (reportCountsByPostId[r.social_post_id] || 0) + 1;
+            }
+          }
+        }
+      }
+      for (const row of nextRows) {
+        if (row.social_post_id) {
+          const rowCount = nextRows.filter((r) => r.social_post_id === row.social_post_id).length;
+          reportCountsByPostId[row.social_post_id] = Math.max(reportCountsByPostId[row.social_post_id] || 0, rowCount);
         }
       }
       if (requestId !== rowRequest.current || currentResource.current?.id !== target.id) return;
@@ -1358,6 +1556,139 @@ function Operations({ user, profile, access, onSignOut, onAccessLost, bypassAuth
           reported_post_record: post ? { ...post, media_url: mediaUrlsByPath[post.media_path] || null } : null,
         };
       });
+      nextRows = nextRows.filter((report) => !report.social_post_id || !isPostHidden(report.social_post_id, report.reported_post_record));
+      nextRows = groupReportedPostRows(nextRows, reportCountsByPostId);
+    }
+    if (target.id === "removed-accounts") {
+      let hiddenPosts = [];
+      if (bypassAuth) {
+        try {
+          const allPosts = await loadLocalAdminTable("social_posts", { limit: 1000 });
+          hiddenPosts = (allPosts || []).filter((p) => p && p.is_hidden);
+        } catch { hiddenPosts = []; }
+      } else {
+        try {
+          const { data: postsData } = await supabase
+            .from("social_posts")
+            .select("id,author_id,body,product_name,media_type,media_path,location_name,created_at,is_hidden")
+            .eq("is_hidden", true)
+            .order("created_at", { ascending: false })
+            .limit(1000);
+          hiddenPosts = postsData || [];
+        } catch { hiddenPosts = []; }
+      }
+      if (requestId !== rowRequest.current || currentResource.current?.id !== target.id) return;
+      const authorIds = [...new Set(hiddenPosts.map((p) => p.author_id).filter(Boolean))];
+      let authorsById = {};
+      if (authorIds.length) {
+        if (bypassAuth) {
+          try {
+            const authors = await loadLocalAdminTable("profiles", { limit: 500, ids: authorIds });
+            authorsById = Object.fromEntries((authors || []).map((a) => [a.id, a]));
+          } catch {}
+        } else {
+          try {
+            const { data: authors } = await supabase.from("profiles").select("id,full_name,email,role,district,status,is_admin_only").in("id", authorIds);
+            authorsById = Object.fromEntries((authors || []).map((a) => [a.id, a]));
+          } catch {}
+        }
+      }
+      if (requestId !== rowRequest.current || currentResource.current?.id !== target.id) return;
+      const postIds = hiddenPosts.map((p) => p.id);
+      let reportsByPostId = {};
+      if (postIds.length) {
+        if (bypassAuth) {
+          try {
+            const allReports = await loadLocalAdminTable("reports", { limit: 1000 });
+            for (const r of (allReports || [])) {
+              if (r.social_post_id && postIds.includes(r.social_post_id)) {
+                const list = reportsByPostId[r.social_post_id] || [];
+                list.push(r);
+                reportsByPostId[r.social_post_id] = list;
+              }
+            }
+          } catch {}
+        } else {
+          try {
+            const { data: reportRows } = await supabase.from("reports").select("id,status,details,reason_categories,category,created_by,created_at,updated_at,social_post_id").in("social_post_id", postIds).limit(1000);
+            for (const r of (reportRows || [])) {
+              if (r.social_post_id) {
+                const list = reportsByPostId[r.social_post_id] || [];
+                list.push(r);
+                reportsByPostId[r.social_post_id] = list;
+              }
+            }
+          } catch {}
+        }
+      }
+      if (requestId !== rowRequest.current || currentResource.current?.id !== target.id) return;
+      const mediaPaths = [...new Set(hiddenPosts.map((post) => post.media_path).filter(Boolean))];
+      const mediaResults = await Promise.all(mediaPaths.map(async (path) => {
+        try {
+          if (bypassAuth) {
+            const response = await fetch(`/__tourismubd-admin/post-media?path=${encodeURIComponent(path)}`);
+            const payload = await response.json();
+            return [path, response.ok ? payload.url || null : null];
+          }
+          const { data } = await supabase.storage.from("social-posts").createSignedUrl(path, 3600);
+          return [path, data?.signedUrl || null];
+        } catch { return [path, null]; }
+      }));
+      if (requestId !== rowRequest.current || currentResource.current?.id !== target.id) return;
+      const mediaUrlsByPath = Object.fromEntries(mediaResults);
+      const postRows = hiddenPosts
+        .filter((post) => {
+          const author = authorsById[post.author_id] || null;
+          if (author && isAccountExplicitlyBlocked(author, "profiles")) return false;
+          if (isAccountExplicitlyBlocked({ id: post.author_id }, "profiles")) return false;
+          return true;
+        })
+        .map((post) => {
+        const author = authorsById[post.author_id] || null;
+        const postReports = reportsByPostId[post.id] || [];
+        const reportCount = postReports.length;
+        const reasons = [...new Set(postReports.flatMap((r) => Array.isArray(r.reason_categories) ? r.reason_categories : []).filter(Boolean))];
+        const latestReport = postReports[0];
+        const mediaUrl = (post.media_path && mediaUrlsByPath[post.media_path]) || null;
+        return {
+          id: post.id,
+          _row_key: post.id,
+          _is_post: true,
+          social_post_id: post.id,
+          post_id: post.id,
+          author_id: post.author_id,
+          reported_post: post.product_name ? `${post.product_name}: ${post.body}` : post.body,
+          body: post.body,
+          media_type: post.media_type,
+          media_path: post.media_path,
+          media_url: mediaUrl,
+          full_name: author?.full_name || "Unknown member",
+          email: author?.email || "—",
+          role: author?.role || "TRAVELER",
+          district: author?.district || "—",
+          status: "REMOVED",
+          updated_at: latestReport?.updated_at || post.created_at,
+          created_at: post.created_at,
+          reports_count: reportCount,
+          report_count: reportCount,
+          report_ids: postReports.map((r) => r.id),
+          all_reports: postReports,
+          reason_categories: reasons,
+          details: postReports.map((r) => r.details).filter(Boolean).join("\n\n") || "Post removed from active use.",
+          reported_post_owner: author?.full_name || "Unknown member",
+          reported_post_owner_id: post.author_id,
+          reported_post_owner_profile: author,
+          reported_post_record: { ...post, media_url: mediaUrl },
+        };
+      });
+      const profileRows = nextRows.map((row) => ({
+        ...row,
+        _is_post: false,
+        reported_post: "—",
+      }));
+      nextRows = [...postRows, ...profileRows].sort((left, right) =>
+        Date.parse(right.updated_at || right.created_at || "") - Date.parse(left.updated_at || left.created_at || "")
+      );
     }
     if (target.table === "providers" && nextRows.length) {
       let profileResult;
@@ -1617,6 +1948,8 @@ function Operations({ user, profile, access, onSignOut, onAccessLost, bypassAuth
       if (resource?.id === "places" && placeVisibilityFilter === "ALL" && row.status === "HIDDEN") return false;
       if (resource?.id === "reports" && reportStatusFilter === "OPEN" && ["RESOLVED", "DISMISSED"].includes(row.status)) return false;
       if (resource?.id === "reports" && reportStatusFilter === "RESOLVED" && !["RESOLVED", "DISMISSED"].includes(row.status)) return false;
+      if (resource?.id === "reports" && row.social_post_id && isPostHidden(row.social_post_id, row.reported_post_record)) return false;
+      if (resource?.id === "removed-accounts" && row._is_post && !isPostHidden(row.id, row.reported_post_record)) return false;
       return true;
     });
   }, [districtFilter, divisionFilter, placeVisibilityFilter, query, reportStatusFilter, resource?.id, rows]);
@@ -1625,45 +1958,144 @@ function Operations({ user, profile, access, onSignOut, onAccessLost, bypassAuth
   const filteredDistrictOptions = useMemo(() => districtOptions.filter((district) => !divisionFilter || district.division === divisionFilter), [districtOptions, divisionFilter]);
 
   const applyAccountAction = async (row) => {
+    if (row._is_post) {
+      if (!row._forceBlock) {
+        let result;
+        if (bypassAuth) {
+          try {
+            const data = await mutateLocalAdminTable("social_posts", "PATCH", "id", row.id, { is_hidden: false });
+            result = { data: data[0] || null, error: null };
+            await mutateLocalAdminTable("reports", "PATCH", "social_post_id", row.id, adminRemovalPatch("resolve", user.id)).catch(() => null);
+          } catch (localError) {
+            result = { data: null, error: localError };
+          }
+        } else {
+          result = await supabase.from("social_posts").update({ is_hidden: false }).eq("id", row.id).select("id").maybeSingle();
+          await supabase.from("reports").update(adminRemovalPatch("resolve", user.id)).eq("social_post_id", row.id);
+        }
+        if (result.error) return setError(result.error.message);
+        if (!result.data) return setError("No post was activated. Your access may have changed.");
+        setHiddenSocialPost(row.id, false);
+        notify("Post restored to active use.");
+        await Promise.all([loadRows(), loadSummary()]);
+        return;
+      }
+    }
     const isExplicitBlock = Boolean(row._forceBlock);
-    const table = resource.id === "blocked-accounts" ? row._blocked_table : resource.table;
-    if (table === "profiles" && !canManageProfile(user.id, row.id)) return setError("You cannot suspend your own Admin account.");
+    const table = (row._is_post || row._blockAccountId || row.reported_post_owner_id) ? "profiles" : (resource.id === "blocked-accounts" ? row._blocked_table : resource.table);
+    const targetAccountId = row._blockAccountId || (row._is_post ? (row.author_id || row.reported_post_owner_id) : (row.reported_post_owner_id || row.id));
+    if (table === "profiles" && !canManageProfile(user.id, targetAccountId)) return setError("You cannot suspend your own Admin account.");
     const restoring = !isExplicitBlock && (Boolean(resource.activation) || resource.id === "blocked-accounts");
     const blocking = isExplicitBlock || (!restoring && (resource.id === "profiles" || resource.table === "providers" || resource.businessSection));
     if (!resource.remove && resource.id !== "blocked-accounts" && !isExplicitBlock) return;
     const patch = isExplicitBlock
-      ? table === "profiles" ? adminRemovalPatch({ status: "SUSPENDED" }, user.id)
-        : adminRemovalPatch({ account_status: "REMOVED", public_status: "HIDDEN" }, user.id)
+      ? table === "profiles" ? adminRemovalPatch({ status: "SUSPENDED", is_blocked: true }, user.id)
+        : adminRemovalPatch({ account_status: "REMOVED", public_status: "HIDDEN", is_blocked: true }, user.id)
       : resource.id === "blocked-accounts"
-        ? table === "profiles" ? adminRemovalPatch({ status: "ACTIVE" }, user.id)
-          : adminRemovalPatch({ account_status: "ACTIVE", public_status: "PUBLISHED" }, user.id)
-        : adminRemovalPatch(resource.remove, user.id);
-    const key = resource.id === "blocked-accounts" ? "id" : resource.primaryKey || "id";
+        ? table === "profiles" ? adminRemovalPatch({ status: "ACTIVE", is_blocked: false }, user.id)
+          : adminRemovalPatch({ account_status: "ACTIVE", public_status: "PUBLISHED", is_blocked: false }, user.id)
+        : adminRemovalPatch(resource.activation ? { ...resource.remove, is_blocked: false } : resource.remove, user.id);
+    const key = (row._is_post || row._blockAccountId || row.reported_post_owner_id) ? "id" : (resource.id === "blocked-accounts" ? "id" : resource.primaryKey || "id");
+    const targetId = (row._is_post || row._blockAccountId || row.reported_post_owner_id) ? targetAccountId : row[key];
     let result;
     if (bypassAuth && LOCAL_ADMIN_MUTABLE_TABLES.has(table)) {
       try {
-        const data = await mutateLocalAdminTable(table, "PATCH", key, row[key], patch);
+        const data = await mutateLocalAdminTable(table, "PATCH", key, targetId, patch);
         result = { data: data[0] || null, error: null };
       } catch (localError) {
         result = { data: null, error: localError };
       }
     } else {
-      result = await supabase.from(table).update(patch).eq(key, row[key]).select(key).maybeSingle();
+      result = await supabase.from(table).update(patch).eq(key, targetId).select(key).maybeSingle();
+      if (result.error && /is_blocked/i.test(result.error.message)) {
+        const fallbackPatch = { ...patch };
+        delete fallbackPatch.is_blocked;
+        result = await supabase.from(table).update(fallbackPatch).eq(key, targetId).select(key).maybeSingle();
+      }
     }
     if (result.error) return setError(result.error.message);
     if (!result.data) return setError("No record was changed. Your access may have changed.");
+    if (isExplicitBlock) {
+      setExplicitBlockedAccount(targetId, true);
+    } else if (restoring) {
+      setExplicitBlockedAccount(targetId, false);
+    } else if (blocking) {
+      setExplicitBlockedAccount(targetId, false);
+    }
+    if (isExplicitBlock && table === "profiles") {
+      const blockLinkedPatch = { account_status: "REMOVED", public_status: "HIDDEN", is_blocked: true };
+      try {
+        for (const linkedTable of ["providers", "businesses"]) {
+          if (bypassAuth) {
+            const accounts = await loadLocalAdminTable(linkedTable, { limit: 500, filter: "user_id", value: targetId });
+            await Promise.all(accounts.map((account) => {
+              setExplicitBlockedAccount(account.id, true);
+              return mutateLocalAdminTable(linkedTable, "PATCH", "id", account.id, blockLinkedPatch);
+            }));
+          } else {
+            const { data: linkedAccounts } = await supabase.from(linkedTable).select("id").eq("user_id", targetId);
+            (linkedAccounts || []).forEach((acct) => setExplicitBlockedAccount(acct.id, true));
+            await supabase.from(linkedTable).update(blockLinkedPatch).eq("user_id", targetId);
+          }
+        }
+      } catch {
+        // best effort cascade
+      }
+    }
+    if (isExplicitBlock && (row.social_post_id || row._is_post || resource.id === "reports")) {
+      const postId = row.social_post_id || (row._is_post ? row.id : null);
+      if (postId) {
+        setHiddenSocialPost(postId, true);
+        if (bypassAuth) {
+          try {
+            await mutateLocalAdminTable("social_posts", "PATCH", "id", postId, { is_hidden: true });
+          } catch { /* best effort */ }
+        } else {
+          try {
+            await supabase.from("social_posts").update({ is_hidden: true }).eq("id", postId);
+          } catch { /* best effort */ }
+        }
+      }
+      if (bypassAuth) {
+        try {
+          if (row.id && resource.id === "reports") {
+            await mutateLocalAdminTable("reports", "PATCH", "id", row.id, adminRemovalPatch("resolve", user.id));
+          }
+          if (row.report_ids?.length) {
+            for (const rid of row.report_ids) {
+              await mutateLocalAdminTable("reports", "PATCH", "id", rid, adminRemovalPatch("resolve", user.id)).catch(() => null);
+            }
+          }
+          if (postId) {
+            await mutateLocalAdminTable("reports", "PATCH", "social_post_id", postId, adminRemovalPatch("resolve", user.id)).catch(() => null);
+          }
+        } catch { /* best effort */ }
+      } else {
+        if (postId) {
+          await supabase.from("reports").update(adminRemovalPatch("resolve", user.id)).eq("social_post_id", postId);
+        }
+        if (row.id && resource.id === "reports") {
+          await supabase.from("reports").update(adminRemovalPatch("resolve", user.id)).eq("id", row.id);
+        }
+        if (row.report_ids?.length) {
+          await supabase.from("reports").update(adminRemovalPatch("resolve", user.id)).in("id", row.report_ids);
+        }
+      }
+    }
     if (restoring && resource.table === "profiles" && resource.id !== "blocked-accounts") {
       const restorePatch = { account_status: "ACTIVE", public_status: "PUBLISHED" };
       try {
         for (const table of ["providers", "businesses"]) {
           if (bypassAuth) {
             const accounts = await loadLocalAdminTable(table, { limit: 500, filter: "user_id", value: row.id });
-            await Promise.all(accounts.filter((account) => account.account_status === "REMOVED").map((account) =>
-              mutateLocalAdminTable(table, "PATCH", "id", account.id, restorePatch),
-            ));
+            await Promise.all(accounts.filter((account) => account.account_status === "REMOVED").map((account) => {
+              setExplicitBlockedAccount(account.id, false);
+              return mutateLocalAdminTable(table, "PATCH", "id", account.id, restorePatch);
+            }));
           } else {
             const restored = await supabase.from(table).update(restorePatch).eq("user_id", row.id).eq("account_status", "REMOVED");
             if (restored.error) throw restored.error;
+            setExplicitBlockedAccount(row.id, false);
           }
         }
       } catch (restoreError) {
@@ -1691,9 +2123,10 @@ function Operations({ user, profile, access, onSignOut, onAccessLost, bypassAuth
   };
 
   const blockAccount = (row) => {
-    const table = resource.id === "blocked-accounts" ? row._blocked_table : resource.table;
-    if (table === "profiles" && !canManageProfile(user.id, row.id)) return setError("You cannot suspend your own Admin account.");
-    setAccountAction({ ...row, _forceBlock: true });
+    const accountId = row._is_post ? (row.author_id || row.reported_post_owner_id) : (row.reported_post_owner_id || row.id);
+    const table = (row._is_post || row.reported_post_owner_id) ? "profiles" : (resource.id === "blocked-accounts" ? row._blocked_table : resource.table);
+    if (table === "profiles" && !canManageProfile(user.id, accountId)) return setError("You cannot suspend your own Admin account.");
+    setAccountAction({ ...row, _forceBlock: true, _blockAccountId: accountId });
   };
 
   const setPlaceStatus = async (row, status) => {
@@ -1730,6 +2163,7 @@ function Operations({ user, profile, access, onSignOut, onAccessLost, bypassAuth
     }
     if (result.error) return setError(result.error.message);
     if (!result.data) return setError("No timeline post was deleted. Your access may have changed.");
+    setHiddenSocialPost(report.social_post_id, false);
     setReportDetails(null);
     notify("Reported timeline post deleted.");
     await loadRows();
@@ -1779,17 +2213,19 @@ function Operations({ user, profile, access, onSignOut, onAccessLost, bypassAuth
     await loadRows();
   };
 
-  const removeReportedPostOwner = (report, target = "account") => {
+  const removeReportedPostOwner = (report, target = report?.social_post_id ? "post" : "account") => {
+    const isPostTarget = target === "post";
     const providerTarget = target === "provider";
     const subscriptionTarget = target === "subscription";
     const businessTarget = target === "business";
     const allowed = adminIsSuper
-      || (access?.role === "users_admin" && target === "account" && !report.reported_provider_record && report.reported_post_owner_profile?.role === "TRAVELER" && !report.reported_post_owner_profile?.is_admin_only)
+      || (access?.role === "users_admin" && (target === "account" || isPostTarget) && !report.reported_provider_record && report.reported_post_owner_profile?.role === "TRAVELER" && !report.reported_post_owner_profile?.is_admin_only)
       || (access?.role === "provider_admin" && providerTarget && Boolean(report.reported_provider_record))
       || (access?.role === "business_admin" && businessTarget && Boolean(report.reported_business_record))
       || (access?.role === "subscription_admin" && subscriptionTarget && Boolean(report.reported_subscription_record))
       || (access?.role === "booking_admin" && target === "booking" && Boolean(report.reported_booking_record));
     if (!allowed) return setError("Use your assigned account section to manage this report target.");
+    if (isPostTarget && !report.social_post_id) return setError("This report is not linked to a timeline post.");
     if (target === "account" && !report.reported_post_owner_id) return setError("This report is not linked to an account.");
     report.admin_action_target = target;
     setReportAccountAction(report);
@@ -1797,11 +2233,59 @@ function Operations({ user, profile, access, onSignOut, onAccessLost, bypassAuth
 
   const suspendReportedPostOwner = async (report) => {
     let result;
-    const target = report.admin_action_target || "account";
+    const target = report.admin_action_target || (report.social_post_id ? "post" : "account");
+    const isPostTarget = target === "post";
     const providerTarget = target === "provider";
     const subscriptionTarget = target === "subscription";
     const bookingTarget = target === "booking";
     const businessTarget = target === "business";
+    if (isPostTarget) {
+      if (!report.social_post_id) return setError("This report is not linked to a timeline post.");
+      if (bypassAuth) {
+        try {
+          const data = await mutateLocalAdminTable("social_posts", "PATCH", "id", report.social_post_id, { is_hidden: true });
+          result = { data: data[0] || null, error: null };
+        } catch (localError) {
+          result = { data: null, error: localError };
+        }
+      } else {
+        result = await supabase.from("social_posts").update({ is_hidden: true }).eq("id", report.social_post_id).select("id").maybeSingle();
+      }
+      if (result.error) return setError(result.error.message);
+      if (!result.data) return setError("No post was removed. Your access may have changed.");
+      setHiddenSocialPost(report.social_post_id, true);
+      let reportResult;
+      if (bypassAuth) {
+        try {
+          const data = await mutateLocalAdminTable("reports", "PATCH", "id", report.id, adminRemovalPatch("resolve", user.id));
+          reportResult = { data: data[0] || null, error: null };
+          if (report.report_ids?.length) {
+            for (const rid of report.report_ids) {
+              if (rid !== report.id) {
+                await mutateLocalAdminTable("reports", "PATCH", "id", rid, adminRemovalPatch("resolve", user.id)).catch(() => null);
+              }
+            }
+          }
+        } catch (localError) {
+          reportResult = { data: null, error: localError };
+        }
+      } else {
+        await supabase.from("reports").update(adminRemovalPatch("resolve", user.id)).eq("social_post_id", report.social_post_id);
+        reportResult = await supabase.from("reports").update(adminRemovalPatch("resolve", user.id)).eq("id", report.id).select("id").maybeSingle();
+      }
+      if (reportResult.error || !reportResult.data) {
+        await Promise.all([loadRows(), loadSummary()]);
+        return setError(`Post is hidden, but the report could not be resolved. ${reportResult.error?.message || "Try resolving the report again."}`);
+      }
+      setReportDetails(null);
+      notify("Post removed from active use. It is now in Activate post.");
+      await loadSummary();
+      setSection("removed-accounts");
+      return;
+    }
+    if (report.reported_post_owner_id) setExplicitBlockedAccount(report.reported_post_owner_id, false);
+    if (report.reported_provider_record?.id) setExplicitBlockedAccount(report.reported_provider_record.id, false);
+    if (report.reported_business_record?.id) setExplicitBlockedAccount(report.reported_business_record.id, false);
     if (providerTarget && !report.reported_provider_record?.id) return setError("The reported provider record could not be found.");
     if (subscriptionTarget && !report.reported_subscription_record?.id) return setError("The reported subscription record could not be found.");
     if (bookingTarget && !report.reported_booking_record?.id) return setError("The reported booking record could not be found.");
@@ -1869,15 +2353,37 @@ function Operations({ user, profile, access, onSignOut, onAccessLost, bypassAuth
     }
     if (result.error) return setError(result.error.message);
     if (!result.data) return setError("No account was removed. Your access may have changed.");
+    if (report.social_post_id) {
+      setHiddenSocialPost(report.social_post_id, true);
+      if (bypassAuth) {
+        try {
+          await mutateLocalAdminTable("social_posts", "PATCH", "id", report.social_post_id, { is_hidden: true });
+        } catch { /* best effort */ }
+      } else {
+        try {
+          await supabase.from("social_posts").update({ is_hidden: true }).eq("id", report.social_post_id);
+        } catch { /* best effort */ }
+      }
+    }
     let reportResult;
     if (bypassAuth) {
       try {
         const data = await mutateLocalAdminTable("reports", "PATCH", "id", report.id, adminRemovalPatch("resolve", user.id));
         reportResult = { data: data[0] || null, error: null };
+        if (report.report_ids?.length) {
+          for (const rid of report.report_ids) {
+            if (rid !== report.id) {
+              await mutateLocalAdminTable("reports", "PATCH", "id", rid, adminRemovalPatch("resolve", user.id)).catch(() => null);
+            }
+          }
+        }
       } catch (localError) {
         reportResult = { data: null, error: localError };
       }
     } else {
+      if (report.social_post_id) {
+        await supabase.from("reports").update(adminRemovalPatch("resolve", user.id)).eq("social_post_id", report.social_post_id);
+      }
       reportResult = await supabase.from("reports").update(adminRemovalPatch("resolve", user.id)).eq("id", report.id).select("id").maybeSingle();
     }
     if (reportResult.error || !reportResult.data) {
@@ -1891,6 +2397,7 @@ function Operations({ user, profile, access, onSignOut, onAccessLost, bypassAuth
   };
 
   const activateAccount = async (row) => {
+    setExplicitBlockedAccount(row.id, false);
     let result;
     if (bypassAuth) {
       try {
@@ -1909,10 +2416,46 @@ function Operations({ user, profile, access, onSignOut, onAccessLost, bypassAuth
   };
 
   const destroy = async (row) => {
+    if (row._is_post) {
+      let result;
+      if (bypassAuth) {
+        try {
+          const data = await mutateLocalAdminTable("social_posts", "DELETE", "id", row.id);
+          result = { data: data[0] || null, error: null };
+        } catch (localError) {
+          result = { data: null, error: localError };
+        }
+      } else {
+        result = await supabase.from("social_posts").delete().eq("id", row.id).select("id").maybeSingle();
+      }
+      if (result.error) { setDeleting(null); return setError(result.error.message); }
+      if (!result.data) { setDeleting(null); return setError("No post was deleted. Your access may have changed."); }
+      setHiddenSocialPost(row.id, false);
+      setDeleting(null);
+      notify("Reported timeline post deleted.");
+      await Promise.all([loadRows(), loadSummary()]);
+      return;
+    }
     if (resource.noDelete) return setError(resource.deleteReason);
     const key = resource.primaryKey || "id";
     let result;
-    if (bypassAuth && LOCAL_ADMIN_MUTABLE_TABLES.has(resource.table)) {
+    if (resource.id === "reports" && row.report_ids?.length) {
+      if (bypassAuth && LOCAL_ADMIN_MUTABLE_TABLES.has(resource.table)) {
+        try {
+          const deleted = [];
+          for (const rid of row.report_ids) {
+            const data = await mutateLocalAdminTable("reports", "DELETE", "id", rid);
+            if (data?.[0]) deleted.push(data[0]);
+          }
+          result = { data: deleted[0] || null, error: null };
+        } catch (localError) {
+          result = { data: null, error: localError };
+        }
+      } else {
+        result = await supabase.from("reports").delete().in("id", row.report_ids).select("id");
+        if (!result.error) result.data = result.data?.[0] || null;
+      }
+    } else if (bypassAuth && LOCAL_ADMIN_MUTABLE_TABLES.has(resource.table)) {
       try {
         const data = await mutateLocalAdminTable(resource.table, "DELETE", key, row[key]);
         result = { data: data[0] || null, error: null };
@@ -1955,9 +2498,9 @@ function Operations({ user, profile, access, onSignOut, onAccessLost, bypassAuth
         <header className="ops-topbar"><div><p className="ops-kicker">Operations console</p><h1>{section === "admin-management" ? "Admin Management" : resource?.table === "providers" ? "Providers" : resource?.subscriptionSection ? "Subscriptions" : resource?.businessSection ? "Business" : resource?.label || "Overview"}</h1></div><div className="ops-account"><span><b>{profile.full_name || "Admin"}</b><small>{ADMIN_ROLE_LABELS[access?.role] || "Super Admin"} · {user.email}</small></span>{!bypassAuth && adminIsSuper ? <button className="ops-icon-button" onClick={() => setPasswordDialogOpen(true)} title="Change password" aria-label="Change password"><KeyRound /></button> : null}{bypassAuth ? null : <button className="ops-icon-button" onClick={onSignOut} title="Sign out" aria-label="Sign out"><LogOut /></button>}</div></header>
         {section === "overview" ? <section className="ops-overview"><div className="ops-stat-grid">{visibleSummary.map((item) => { const Icon = item.icon; return <button onClick={() => setSection(item.resource)} key={item.label}><span><Icon /></span><small>{item.label}</small><strong>{counts[item.resource] ?? "—"}</strong></button>; })}</div><div className="ops-note"><BookOpenCheck /><div><h2>Protected operations</h2><p>Changes are enforced by Supabase row-level security and written to Audit history. User authentication identities remain server-managed.</p></div></div></section> : null}
         {resource?.id === "places" ? <div className="ops-place-tabs" role="tablist" aria-label="Place visibility"><button role="tab" aria-selected={placeVisibilityFilter === "ALL"} className={placeVisibilityFilter === "ALL" ? "active" : ""} onClick={() => setPlaceVisibilityFilter("ALL")}><MapPin />All places</button><button role="tab" aria-selected={placeVisibilityFilter === "HIDDEN"} className={placeVisibilityFilter === "HIDDEN" ? "active" : ""} onClick={() => setPlaceVisibilityFilter("HIDDEN")}><EyeOff />Hied places</button></div> : null}
-        {resource?.reportSection ? <div className="ops-place-tabs" role="tablist" aria-label="Report account status"><button role="tab" aria-selected={section === "reports"} className={section === "reports" ? "active" : ""} onClick={() => setSection("reports")}><AlertTriangle />Reports</button>{adminIsSuper ? <button role="tab" aria-selected={section === "removed-accounts"} className={section === "removed-accounts" ? "active" : ""} onClick={() => setSection("removed-accounts")}><BadgeCheck />Activate accounts</button> : visibleActivationResources.map((item) => <button role="tab" aria-selected={section === item.id} className={section === item.id ? "active" : ""} onClick={() => setSection(item.id)} key={item.id}><BadgeCheck />{item.label}</button>)}</div> : null}
+        {resource?.reportSection ? <div className="ops-place-tabs" role="tablist" aria-label="Report account status"><button role="tab" aria-selected={section === "reports"} className={section === "reports" ? "active" : ""} onClick={() => setSection("reports")}><AlertTriangle />Reports</button>{adminIsSuper ? <button role="tab" aria-selected={section === "removed-accounts"} className={section === "removed-accounts" ? "active" : ""} onClick={() => setSection("removed-accounts")}><BadgeCheck />Activate post</button> : visibleActivationResources.map((item) => <button role="tab" aria-selected={section === item.id} className={section === item.id ? "active" : ""} onClick={() => setSection(item.id)} key={item.id}><BadgeCheck />{item.label}</button>)}</div> : null}
         {section === "admin-management" && adminIsSuper ? <AdminManagement bypassAuth={bypassAuth} readOnly={!adminIsSuper} onNotice={notify} /> : null}
-        {resource ? <section className="ops-table-panel">{resource.businessSection && !resource.subscriptionSection && !resource.activation ? <div className="ops-provider-tabs ops-business-tabs" role="tablist" aria-label="Business management"><button role="tab" aria-selected={section === "businesses"} className={section === "businesses" ? "active" : ""} onClick={() => setSection("businesses")}><BriefcaseBusiness />Business accounts</button>{BUSINESS_RESOURCES.map((item) => { const Icon = item.icon; return <button role="tab" aria-selected={section === item.id} className={section === item.id ? "active" : ""} onClick={() => setSection(item.id)} key={item.id}><Icon />{item.label}</button>; })}</div> : null}{resource.table === "providers" && !resource.activation ? <div className="ops-provider-tabs" role="tablist" aria-label="Provider categories"><button role="tab" aria-selected={section === "providers"} className={section === "providers" ? "active" : ""} onClick={() => setSection("providers")}><Building2 />All providers</button>{PROVIDER_RESOURCES.map((item) => { const Icon = item.icon; return <button role="tab" aria-selected={section === item.id} className={section === item.id ? "active" : ""} onClick={() => setSection(item.id)} key={item.id}><Icon />{item.label}</button>; })}</div> : null}{resource.subscriptionSection && !resource.activation ? <div className="ops-subscription-tabs" role="tablist" aria-label="Subscription account types"><button role="tab" aria-selected={section === "subscriptions"} className={section === "subscriptions" ? "active" : ""} onClick={() => setSection("subscriptions")}><ClipboardCheck />Provider subscriptions</button><button role="tab" aria-selected={section === "business-subscriptions"} className={section === "business-subscriptions" ? "active" : ""} onClick={() => setSection("business-subscriptions")}><BriefcaseBusiness />Business accounts</button></div> : null}<div className="ops-table-tools"><div className="ops-table-filters"><label><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${resource.label.toLowerCase()}`} /></label>{resource.id === "places" ? <select aria-label="Filter by division" value={divisionFilter} onChange={(event) => { setDivisionFilter(event.target.value); setDistrictFilter(""); }}><option value="">All divisions</option>{divisionOptions.map((division) => <option value={division} key={division}>{division}</option>)}</select> : null}{resource.id === "places" ? <select aria-label="Filter by district" value={districtFilter} onChange={(event) => setDistrictFilter(event.target.value)}><option value="">All districts</option>{filteredDistrictOptions.map((district) => <option value={district.id} key={district.id}>{district.name}</option>)}</select> : null}{resource.id === "reports" ? <select aria-label="Filter by report status" value={reportStatusFilter} onChange={(event) => setReportStatusFilter(event.target.value)}><option value="OPEN">Open reports</option><option value="RESOLVED">Resolved reports</option><option value="ALL">All reports</option></select> : null}</div><div className="ops-table-actions">{resource.id === "places" ? <button className="ops-button" onClick={() => setPlaceEditor({ row: null })}><Plus /> Add place</button> : null}<button className="ops-icon-button" onClick={() => loadRows(resource)} title="Refresh" aria-label="Refresh records"><RefreshCw /></button></div></div>{bypassAuth && resource.table === "providers" ? <div className="ops-data-note"><ShieldCheck /><span>Protected provider accounts load through the localhost Admin server. The Supabase service-role key stays outside the browser.</span></div> : null}{error ? <div className="ops-alert" role="alert"><AlertTriangle /><span>{error}</span><button onClick={() => setError("")} aria-label="Dismiss error"><X /></button></div> : null}<div className="ops-table-wrap"><table><thead><tr>{resource.columns.map((column) => <th key={column}>{column.replaceAll("_", " ")}</th>)}<th>Actions</th></tr></thead><tbody>{loading ? <tr><td colSpan={resource.columns.length + 1} className="ops-empty">Loading records...</td></tr> : null}{!loading && !visibleRows.length ? <tr><td colSpan={resource.columns.length + 1} className="ops-empty">{resource.table === "providers" ? "No provider accounts are available to this session." : "No records found."}</td></tr> : null}{visibleRows.map((row) => { const self = resource.id === "profiles" && !canManageProfile(user.id, row.id); const placesSection = resource.id === "places"; const profilesSection = resource.table === "profiles" || resource.table === "businesses"; const providersSection = resource.table === "providers"; const providerSubscriptionSection = resource.table === "provider_subscriptions"; const bookingsSection = resource.id === "bookings"; const reportsSection = resource.id === "reports"; return <tr key={row[resource.primaryKey || "id"]}>{resource.columns.map((column) => <td key={column} title={show(row[column])}>{show(row[column])}</td>)}<td><div className="ops-row-actions">{resource.readonly ? <span className="ops-readonly"><ShieldCheck /> Read only</span> : row._publicPreview ? <><PublicProfileLink provider={row} /><button onClick={() => setProviderProfile(row)} title="View Admin details" aria-label="View Admin details"><Eye /></button></> : <>{bookingsSection && row.provider_record ? <><PublicProfileLink provider={row.provider_record} /><button onClick={() => setProviderProfile(row.provider_record)} title="View provider details" aria-label="View provider details"><Eye /></button><button onClick={() => setBookingHistory(row)} title="View booking history" aria-label="View booking history"><BookOpenCheck /></button></> : null}{reportsSection ? <button onClick={() => setReportDetails(row)} title="View report details" aria-label="View report details"><Eye /></button> : null}{providersSection || profilesSection ? <PublicProfileLink provider={row} /> : null}{providerSubscriptionSection && row.provider_record ? <><PublicProfileLink provider={row.provider_record} /><button onClick={() => setProviderProfile(row.provider_record)} title="View Admin details" aria-label="View Admin details"><Eye /></button></> : null}{profilesSection ? <button onClick={() => setTravelerProfile(row.profile || row)} title={resource.table === "businesses" ? "View business owner details" : "View user details"} aria-label={resource.table === "businesses" ? "View business owner details" : "View user details"}><Eye /></button> : null}{providersSection ? <button onClick={() => setProviderProfile(row)} title="View Admin details" aria-label="View Admin details"><Eye /></button> : null}{!bookingsSection ? <><button onClick={() => placesSection ? setPlaceEditor({ row }) : setEditing(row)} title="Edit" aria-label="Edit record"><Pencil /></button>{placesSection ? <button onClick={() => setPlaceStatus(row, row.status === "PUBLISHED" ? "HIDDEN" : "PUBLISHED")} title={row.status === "PUBLISHED" ? "Hide from public pages" : "Publish on public pages"} aria-label={row.status === "PUBLISHED" ? "Hide place" : "Publish place"}>{row.status === "PUBLISHED" ? <EyeOff /> : <Eye />}</button> : resource.remove ? <button onClick={() => remove(row)} disabled={self} title={self ? "You cannot suspend yourself" : "Remove from active use"} aria-label="Remove record"><Archive /></button> : null}{resource.activation ? <button className="danger ops-block-button" onClick={() => blockAccount(row)} disabled={self} title={self ? "You cannot block yourself" : "Block account"} aria-label="Block record"><ShieldAlert /></button> : null}<button className="danger" onClick={() => resource.noDelete ? setError(resource.deleteReason) : setDeleting(row)} title={resource.noDelete ? resource.deleteReason : "Delete permanently"} aria-label="Delete record"><Trash2 /></button></> : null}</>}</div></td></tr>; })}</tbody></table></div><p className="ops-table-foot">Showing {visibleRows.length} of {rows.length} loaded records</p></section> : null}
+        {resource ? <section className="ops-table-panel">{resource.businessSection && !resource.subscriptionSection && !resource.activation ? <div className="ops-provider-tabs ops-business-tabs" role="tablist" aria-label="Business management"><button role="tab" aria-selected={section === "businesses"} className={section === "businesses" ? "active" : ""} onClick={() => setSection("businesses")}><BriefcaseBusiness />Business accounts</button>{BUSINESS_RESOURCES.map((item) => { const Icon = item.icon; return <button role="tab" aria-selected={section === item.id} className={section === item.id ? "active" : ""} onClick={() => setSection(item.id)} key={item.id}><Icon />{item.label}</button>; })}</div> : null}{resource.table === "providers" && !resource.activation ? <div className="ops-provider-tabs" role="tablist" aria-label="Provider categories"><button role="tab" aria-selected={section === "providers"} className={section === "providers" ? "active" : ""} onClick={() => setSection("providers")}><Building2 />All providers</button>{PROVIDER_RESOURCES.map((item) => { const Icon = item.icon; return <button role="tab" aria-selected={section === item.id} className={section === item.id ? "active" : ""} onClick={() => setSection(item.id)} key={item.id}><Icon />{item.label}</button>; })}</div> : null}{resource.subscriptionSection && !resource.activation ? <div className="ops-subscription-tabs" role="tablist" aria-label="Subscription account types"><button role="tab" aria-selected={section === "subscriptions"} className={section === "subscriptions" ? "active" : ""} onClick={() => setSection("subscriptions")}><ClipboardCheck />Provider subscriptions</button><button role="tab" aria-selected={section === "business-subscriptions"} className={section === "business-subscriptions" ? "active" : ""} onClick={() => setSection("business-subscriptions")}><BriefcaseBusiness />Business accounts</button></div> : null}<div className="ops-table-tools"><div className="ops-table-filters"><label><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${resource.label.toLowerCase()}`} /></label>{resource.id === "places" ? <select aria-label="Filter by division" value={divisionFilter} onChange={(event) => { setDivisionFilter(event.target.value); setDistrictFilter(""); }}><option value="">All divisions</option>{divisionOptions.map((division) => <option value={division} key={division}>{division}</option>)}</select> : null}{resource.id === "places" ? <select aria-label="Filter by district" value={districtFilter} onChange={(event) => setDistrictFilter(event.target.value)}><option value="">All districts</option>{filteredDistrictOptions.map((district) => <option value={district.id} key={district.id}>{district.name}</option>)}</select> : null}{resource.id === "reports" ? <select aria-label="Filter by report status" value={reportStatusFilter} onChange={(event) => setReportStatusFilter(event.target.value)}><option value="OPEN">Open reports</option><option value="RESOLVED">Resolved reports</option><option value="ALL">All reports</option></select> : null}</div><div className="ops-table-actions">{resource.id === "places" ? <button className="ops-button" onClick={() => setPlaceEditor({ row: null })}><Plus /> Add place</button> : null}<button className="ops-icon-button" onClick={() => loadRows(resource)} title="Refresh" aria-label="Refresh records"><RefreshCw /></button></div></div>{bypassAuth && resource.table === "providers" ? <div className="ops-data-note"><ShieldCheck /><span>Protected provider accounts load through the localhost Admin server. The Supabase service-role key stays outside the browser.</span></div> : null}{error ? <div className="ops-alert" role="alert"><AlertTriangle /><span>{error}</span><button onClick={() => setError("")} aria-label="Dismiss error"><X /></button></div> : null}<div className="ops-table-wrap"><table><thead><tr>{resource.columns.map((column) => <th key={column}>{column.replaceAll("_", " ")}</th>)}<th>Actions</th></tr></thead><tbody>{loading ? <tr><td colSpan={resource.columns.length + 1} className="ops-empty">Loading records...</td></tr> : null}{!loading && !visibleRows.length ? <tr><td colSpan={resource.columns.length + 1} className="ops-empty">{resource.table === "providers" ? "No provider accounts are available to this session." : "No records found."}</td></tr> : null}{visibleRows.map((row) => { const self = resource.id === "profiles" && !canManageProfile(user.id, row.id); const placesSection = resource.id === "places"; const profilesSection = resource.table === "profiles" || resource.table === "businesses"; const providersSection = resource.table === "providers"; const providerSubscriptionSection = resource.table === "provider_subscriptions"; const bookingsSection = resource.id === "bookings"; const reportsSection = resource.id === "reports"; return <tr key={row._row_key || row[resource.primaryKey || "id"]}>{resource.columns.map((column) => <td key={column} title={show(row[column])}>{show(row[column])}</td>)}<td><div className="ops-row-actions">{resource.readonly ? <span className="ops-readonly"><ShieldCheck /> Read only</span> : row._publicPreview ? <><PublicProfileLink provider={row} /><button onClick={() => setProviderProfile(row)} title="View Admin details" aria-label="View Admin details"><Eye /></button></> : <>{bookingsSection && row.provider_record ? <><PublicProfileLink provider={row.provider_record} /><button onClick={() => setProviderProfile(row.provider_record)} title="View provider details" aria-label="View provider details"><Eye /></button><button onClick={() => setBookingHistory(row)} title="View booking history" aria-label="View booking history"><BookOpenCheck /></button></> : null}{reportsSection ? <button onClick={() => setReportDetails(row)} title="View report details" aria-label="View report details"><Eye /></button> : null}{providersSection || profilesSection ? <PublicProfileLink provider={row._is_post ? { user_id: row.author_id } : row} /> : null}{providerSubscriptionSection && row.provider_record ? <><PublicProfileLink provider={row.provider_record} /><button onClick={() => setProviderProfile(row.provider_record)} title="View Admin details" aria-label="View Admin details"><Eye /></button></> : null}{row._is_post ? <button onClick={() => setReportDetails(row)} title="View post and report details" aria-label="View post and report details"><Eye /></button> : profilesSection ? <button onClick={() => setTravelerProfile(row.profile || row)} title={resource.table === "businesses" ? "View business owner details" : "View user details"} aria-label={resource.table === "businesses" ? "View business owner details" : "View user details"}><Eye /></button> : null}{providersSection ? <button onClick={() => setProviderProfile(row)} title="View Admin details" aria-label="View Admin details"><Eye /></button> : null}{!bookingsSection ? <>{row._is_post ? null : <button onClick={() => placesSection ? setPlaceEditor({ row }) : setEditing(row)} title="Edit" aria-label="Edit record"><Pencil /></button>}{placesSection ? <button onClick={() => setPlaceStatus(row, row.status === "PUBLISHED" ? "HIDDEN" : "PUBLISHED")} title={row.status === "PUBLISHED" ? "Hide from public pages" : "Publish on public pages"} aria-label={row.status === "PUBLISHED" ? "Hide place" : "Publish place"}>{row.status === "PUBLISHED" ? <EyeOff /> : <Eye />}</button> : resource.remove ? <button onClick={() => remove(row)} disabled={self} title={self ? "You cannot suspend yourself" : "Remove from active use"} aria-label="Remove record"><Archive /></button> : null}{resource.activation ? <button className="danger ops-block-button" onClick={() => blockAccount(row)} disabled={self || (row._is_post && !canManageProfile(user.id, row.author_id || row.reported_post_owner_id))} title={self || (row._is_post && !canManageProfile(user.id, row.author_id || row.reported_post_owner_id)) ? "You cannot block yourself" : "Block account"} aria-label="Block record"><ShieldAlert /></button> : null}{resource.activation || row._is_post ? null : <button className="danger" onClick={() => resource.noDelete ? setError(resource.deleteReason) : setDeleting(row)} title={resource.noDelete ? resource.deleteReason : "Delete permanently"} aria-label="Delete record"><Trash2 /></button>}</> : null}</>}</div></td></tr>; })}</tbody></table></div><p className="ops-table-foot">Showing {visibleRows.length} of {rows.length} loaded records</p></section> : null}
       </main>
       {editing ? <Editor resource={resource} row={editing} userId={user.id} bypassAuth={bypassAuth} onClose={() => setEditing(null)} onSaved={saved} /> : null}
       {placeEditor ? <PlaceEditor row={placeEditor.row} districts={districtOptions} bypassAuth={bypassAuth} onClose={() => setPlaceEditor(null)} onSaved={saved} /> : null}
@@ -1965,9 +2508,9 @@ function Operations({ user, profile, access, onSignOut, onAccessLost, bypassAuth
       {accountAction ? <AccountActionDialog resource={resource} row={accountAction} onClose={() => setAccountAction(null)} onConfirm={(row) => { setAccountAction(null); applyAccountAction(row); }} /> : null}
       {providerProfile ? <ProviderProfile provider={providerProfile} bypassAuth={bypassAuth} onClose={() => setProviderProfile(null)} /> : null}
       {bookingHistory ? <BookingHistoryDialog provider={bookingHistory} onClose={() => setBookingHistory(null)} onCancelBooking={adminIsSuper || access?.role === "booking_admin" ? cancelBooking : null} /> : null}
-      {reportDetails ? <ReportDetailsDialog report={reportDetails} readOnly={!adminIsSuper && !(access?.role === "users_admin" && !reportDetails.reported_provider_record && reportDetails.reported_post_owner_profile?.role === "TRAVELER" && !reportDetails.reported_post_owner_profile?.is_admin_only) && !(access?.role === "business_admin" && Boolean(reportDetails.reported_business_record)) && !(access?.role === "provider_admin" && Boolean(reportDetails.reported_provider_record)) && !(access?.role === "subscription_admin" && Boolean(reportDetails.reported_subscription_record)) && !(access?.role === "booking_admin" && Boolean(reportDetails.reported_booking_record))} canDeletePost={adminIsSuper || (access?.role === "users_admin" && !reportDetails.reported_provider_record && reportDetails.reported_post_owner_profile?.role === "TRAVELER" && !reportDetails.reported_post_owner_profile?.is_admin_only) || (access?.role === "business_admin" && Boolean(reportDetails.reported_business_record)) || (access?.role === "provider_admin" && Boolean(reportDetails.reported_provider_record)) || (access?.role === "subscription_admin" && Boolean(reportDetails.reported_subscription_record))} canRemoveAccount={adminIsSuper || (access?.role === "users_admin" && !reportDetails.reported_provider_record && reportDetails.reported_post_owner_profile?.role === "TRAVELER" && !reportDetails.reported_post_owner_profile?.is_admin_only)} canRemoveProvider={adminIsSuper || access?.role === "provider_admin"} canRemoveBusiness={adminIsSuper || access?.role === "business_admin"} canFreezeSubscription={adminIsSuper || access?.role === "subscription_admin"} canCancelBooking={adminIsSuper || access?.role === "booking_admin"} onClose={() => setReportDetails(null)} onViewProfile={setTravelerProfile} onViewProvider={setProviderProfile} onViewPost={setReportedPost} onLinkPost={linkReportedPost} onDeletePost={deleteReportedPost} onRemoveAccount={removeReportedPostOwner} /> : null}
+      {reportDetails ? <ReportDetailsDialog report={reportDetails} readOnly={!adminIsSuper && !(access?.role === "users_admin" && !reportDetails.reported_provider_record && reportDetails.reported_post_owner_profile?.role === "TRAVELER" && !reportDetails.reported_post_owner_profile?.is_admin_only) && !(access?.role === "business_admin" && Boolean(reportDetails.reported_business_record)) && !(access?.role === "provider_admin" && Boolean(reportDetails.reported_provider_record)) && !(access?.role === "subscription_admin" && Boolean(reportDetails.reported_subscription_record)) && !(access?.role === "booking_admin" && Boolean(reportDetails.reported_booking_record))} canDeletePost={adminIsSuper || (access?.role === "users_admin" && !reportDetails.reported_provider_record && reportDetails.reported_post_owner_profile?.role === "TRAVELER" && !reportDetails.reported_post_owner_profile?.is_admin_only) || (access?.role === "business_admin" && Boolean(reportDetails.reported_business_record)) || (access?.role === "provider_admin" && Boolean(reportDetails.reported_provider_record)) || (access?.role === "subscription_admin" && Boolean(reportDetails.reported_subscription_record))} canRemoveAccount={adminIsSuper || (access?.role === "users_admin" && !reportDetails.reported_provider_record && reportDetails.reported_post_owner_profile?.role === "TRAVELER" && !reportDetails.reported_post_owner_profile?.is_admin_only)} canRemoveProvider={adminIsSuper || access?.role === "provider_admin"} canRemoveBusiness={adminIsSuper || access?.role === "business_admin"} canFreezeSubscription={adminIsSuper || access?.role === "subscription_admin"} canCancelBooking={adminIsSuper || access?.role === "booking_admin"} onClose={() => setReportDetails(null)} onViewProfile={setTravelerProfile} onViewProvider={setProviderProfile} onViewPost={setReportedPost} onLinkPost={linkReportedPost} onDeletePost={deleteReportedPost} onRemoveAccount={removeReportedPostOwner} onActivatePost={(post) => { setReportDetails(null); applyAccountAction(post); }} onBlockAccount={(post) => { setReportDetails(null); blockAccount(post); }} /> : null}
       {reportAccountAction ? <ReportAccountRemovalDialog report={reportAccountAction} onClose={() => setReportAccountAction(null)} onConfirm={(report) => { setReportAccountAction(null); suspendReportedPostOwner(report); }} /> : null}
-      {reportedPost ? <ReportedPostDialog report={reportedPost} onClose={() => setReportedPost(null)} /> : null}
+      {reportedPost ? <ReportedPostDialog report={reportedPost} bypassAuth={bypassAuth} onClose={() => setReportedPost(null)} /> : null}
       {travelerProfile ? <TravelerProfile profile={travelerProfile} onClose={() => setTravelerProfile(null)} /> : null}
       {passwordDialogOpen ? <AdminPasswordChangeDialog email={user.email} onClose={() => setPasswordDialogOpen(false)} onChanged={() => { setPasswordDialogOpen(false); onSignOut(); }} /> : null}
       <div className={toast ? "ops-toast show" : "ops-toast"} role="status">{toast}</div>

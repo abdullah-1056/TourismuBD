@@ -119,3 +119,61 @@ export function sortDestinationRows(rows, resourceId) {
     return 0;
   });
 }
+
+export function groupReportedPostRows(rows, reportCounts = {}) {
+  if (!Array.isArray(rows)) return [];
+  const postGroups = new Map();
+  const nonPostRows = [];
+
+  for (const row of rows) {
+    if (row && row.social_post_id) {
+      const list = postGroups.get(row.social_post_id) || [];
+      list.push(row);
+      postGroups.set(row.social_post_id, list);
+    } else if (row) {
+      nonPostRows.push(row);
+    }
+  }
+
+  const groupedPostRows = [...postGroups.entries()].map(([postId, reportsList]) => {
+    reportsList.sort((left, right) => Date.parse(right.updated_at || right.created_at || "") - Date.parse(left.updated_at || left.created_at || ""));
+    const primary = reportsList[0];
+    const hasOpen = reportsList.some((r) => r.status === "OPEN");
+    const allReasons = [...new Set(reportsList.flatMap((r) => (Array.isArray(r.reason_categories) ? r.reason_categories : [])).filter(Boolean))];
+    const allReportIds = reportsList.map((r) => r.id).filter(Boolean);
+    const reporterCount = reportCounts && reportCounts[postId] != null ? Number(reportCounts[postId]) : reportsList.length;
+    const formattedDetails = reporterCount === 1
+      ? primary.details
+      : reportsList.map((r, i) => {
+          const dateStr = r.created_at ? new Date(r.created_at).toLocaleString() : "Date not available";
+          return `[Report ${i + 1} - ${dateStr}]:\n${r.details || "No details provided"}`;
+        }).join("\n\n");
+
+    return {
+      ...primary,
+      _row_key: postId,
+      id: primary.id,
+      social_post_id: postId,
+      post_id: postId,
+      status: hasOpen ? "OPEN" : primary.status,
+      report_count: reporterCount,
+      reports_count: reporterCount,
+      report_ids: allReportIds,
+      all_reports: reportsList,
+      reason_categories: allReasons.length ? allReasons : (primary.reason_categories || []),
+      details: formattedDetails,
+      created_by: reporterCount === 1 ? primary.created_by : `${reporterCount} members (${reportsList.map((r) => r.created_by).filter(Boolean).join(", ")})`,
+      updated_at: primary.updated_at,
+    };
+  });
+
+  const processedNonPostRows = nonPostRows.map((row) => ({
+    ...row,
+    reports_count: row.reports_count ?? 1,
+    report_count: row.report_count ?? 1,
+  }));
+
+  return [...groupedPostRows, ...processedNonPostRows].sort((left, right) =>
+    Date.parse(right.updated_at || right.created_at || "") - Date.parse(left.updated_at || left.created_at || "")
+  );
+}

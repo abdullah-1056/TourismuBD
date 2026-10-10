@@ -14,9 +14,9 @@ const ADMIN_MUTABLE_TABLES = new Set([
   "bookings", "reviews", "reports", "social_posts",
 ]);
 const ADMIN_EDITABLE_FIELDS = {
-  profiles: new Set(["full_name", "email", "phone", "bio", "blood_group", "gender", "district", "working_place", "hobby", "present_address", "permanent_address", "avatar_url", "profile_photo_urls", "status"]),
-  providers: new Set(["display_name", "service_name", "bio", "photo_url", "contact_email", "contact_phone", "account_status", "public_status"]),
-  businesses: new Set(["business_name", "description", "district", "contact_email", "contact_phone", "account_status", "public_status"]),
+  profiles: new Set(["full_name", "email", "phone", "bio", "blood_group", "gender", "district", "working_place", "hobby", "present_address", "permanent_address", "avatar_url", "profile_photo_urls", "status", "is_blocked"]),
+  providers: new Set(["display_name", "service_name", "bio", "photo_url", "contact_email", "contact_phone", "account_status", "public_status", "is_blocked"]),
+  businesses: new Set(["business_name", "description", "district", "contact_email", "contact_phone", "account_status", "public_status", "is_blocked"]),
   business_products: new Set(["name", "description", "price_bdt", "stock_quantity", "image_url", "status"]),
   places: new Set(["district_id", "name", "slug", "upazila_or_area", "category", "latitude", "longitude", "short_description", "best_time", "how_to_reach", "practical_tips", "image_url", "status"]),
   place_relationships: new Set(["relationship_type", "travel_minutes"]),
@@ -26,7 +26,7 @@ const ADMIN_EDITABLE_FIELDS = {
   saved_trips: new Set(["name"]),
   reviews: new Set(["status"]),
   reports: new Set(["status", "admin_note", "resolved_by", "resolved_at", "social_post_id"]),
-  social_posts: new Set(),
+  social_posts: new Set(["is_hidden"]),
 };
 const FILTER_COLUMNS = new Set(["id", "provider_id", "user_id", "type", "role", "status"]);
 const PUBLIC_PROFILE_SOURCE_FIELDS = "id,full_name,role,avatar_url,profile_photo_urls,bio,district,email,phone,blood_group,gender,working_place,hobby,present_address,permanent_address,followers_visible";
