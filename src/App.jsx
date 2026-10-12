@@ -214,13 +214,46 @@ function useAuth() {
   const [auth, setAuth] = useState({ user: null });
 
   useEffect(() => {
+    if (typeof window !== "undefined") {
+      const hash = window.location.hash || "";
+      const search = window.location.search || "";
+      if (
+        hash.includes("type=recovery") ||
+        search.includes("type=recovery") ||
+        search.includes("admin-recovery=1") ||
+        hash.includes("otp_expired") ||
+        hash.includes("error_code=otp_expired") ||
+        hash.includes("invalid+or+has+expired") ||
+        (hash.includes("error=access_denied") && hash.includes("error_description="))
+      ) {
+        const adminUrl = import.meta.env.VITE_ADMIN_APP_URL || import.meta.env.VITE_ADMIN_URL || (import.meta.env.DEV ? "http://127.0.0.1:5176" : "");
+        if (adminUrl) {
+          const target = new URL(adminUrl, window.location.origin);
+          target.searchParams.set("admin-recovery", "1");
+          window.location.replace(`${target.toString()}${hash}`);
+          return;
+        }
+      }
+    }
+
     if (!supabase) return;
     let active = true;
     const refresh = async (session) => {
       if (active) setAuth({ user: session?.user || null });
     };
     supabase.auth.getSession().then(({ data }) => refresh(data.session));
-    const { data } = supabase.auth.onAuthStateChange((_event, session) => refresh(session));
+    const { data } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "PASSWORD_RECOVERY") {
+        const adminUrl = import.meta.env.VITE_ADMIN_APP_URL || import.meta.env.VITE_ADMIN_URL || (import.meta.env.DEV ? "http://127.0.0.1:5176" : "");
+        if (adminUrl) {
+          const target = new URL(adminUrl, window.location.origin);
+          target.searchParams.set("admin-recovery", "1");
+          window.location.replace(`${target.toString()}${window.location.hash}`);
+          return;
+        }
+      }
+      refresh(session);
+    });
     return () => { active = false; data.subscription.unsubscribe(); };
   }, []);
 

@@ -41,6 +41,7 @@ export function canAccessAdminSection(access, section, resource) {
   if (!hasAdminAccess(access)) return false;
   if (section === "overview") return true;
   if (section === "reports") return isSuperAdmin(access) || ["users_admin", "provider_admin", "business_admin"].includes(access?.role);
+  if (section === "blocked-accounts") return isSuperAdmin(access) || ["users_admin", "provider_admin", "business_admin"].includes(access?.role);
   if (section === "admin-management") return isSuperAdmin(access);
   if (isSuperAdmin(access)) return true;
   return MODULE_ROLE[resource?.adminModule] === access.role;

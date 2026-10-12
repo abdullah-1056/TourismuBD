@@ -259,3 +259,110 @@ test("admin destinations are arranged by division, district, and name", () => {
   const districts = [{ division: "Sylhet", name: "Sylhet" }, { division: "Dhaka", name: "Tangail" }, { division: "Dhaka", name: "Dhaka" }];
   assert.deepEqual(sortDestinationRows(districts, "districts").map(({ name }) => name), ["Dhaka", "Tangail", "Sylhet"]);
 });
+
+test("canAccessAdminSection centrally enforces blocked-accounts authorization", () => {
+  assert.equal(canAccessAdminSection({ role: "super_admin", is_active: true }, "blocked-accounts"), true);
+  assert.equal(canAccessAdminSection({ role: "users_admin", is_active: true }, "blocked-accounts"), true);
+  assert.equal(canAccessAdminSection({ role: "provider_admin", is_active: true }, "blocked-accounts"), true);
+  assert.equal(canAccessAdminSection({ role: "business_admin", is_active: true }, "blocked-accounts"), true);
+  assert.equal(canAccessAdminSection({ role: "subscription_admin", is_active: true }, "blocked-accounts"), false);
+  assert.equal(canAccessAdminSection({ role: "booking_admin", is_active: true }, "blocked-accounts"), false);
+});
+
+test("migration 110 grants contextual read-only business and profile policies to Booking Admin", () => {
+  const migration110 = readFileSync(new URL("../supabase/migrations/110_booking_admin_business_read.sql", import.meta.url), "utf8");
+  assert.match(migration110, /create policy businesses_booking_admin_select on public\.businesses for select to authenticated/);
+  assert.match(migration110, /create policy profiles_booking_admin_select on public\.profiles for select to authenticated/);
+  assert.match(migration110, /public\.can_access_admin_module\('bookings'\)/);
+  assert.match(migration110, /exists \(select 1 from public\.businesses where user_id = profiles\.id\)/);
+  assert.match(migration110, /exists \(select 1 from public\.providers where user_id = profiles\.id\)/);
+  assert.match(migration110, /exists \(select 1 from public\.bookings where traveler_id = profiles\.id\)/);
+  assert.doesNotMatch(migration110, /for (insert|update|delete|all)/i);
+});
+
+test("Subscription Admin can access Activate subscriptions under Subscriptions section", () => {
+  assert.match(adminApp, /section === "frozen-subscriptions"\) \? <div className="ops-subscription-tabs"/);
+  assert.match(adminApp, /canOpenSection\("frozen-subscriptions"\) \? <button role="tab" aria-selected=\{section === "frozen-subscriptions"\}/);
+});
+
+test("Booking Admin can perform authorized booking operations and view contextual information", () => {
+  const bookingAdmin = { role: "booking_admin", is_active: true };
+  assert.equal(canAccessAdminSection(bookingAdmin, "overview"), true);
+  assert.equal(canAccessAdminSection(bookingAdmin, "bookings", { adminModule: "bookings" }), true);
+
+  // Authorized booking cancellation in UI
+  assert.match(adminApp, /onCancelBooking=\{adminIsSuper \|\| access\?\.role === "booking_admin" \? cancelBooking : null\}/);
+  assert.match(adminApp, /cancellation_reason: "Cancelled by Booking Admin"/);
+
+  // Contextual information viewing
+  assert.match(adminApp, /bookingsSection && row\.provider_record \? <><PublicProfileLink provider=\{row\.provider_record\} \/><button onClick=\{\(\) => setProviderProfile\(row\.provider_record\)\} title="View provider details"/);
+  assert.match(adminApp, /<button onClick=\{\(\) => setBookingHistory\(row\)\} title="View booking history"/);
+});
+
+test("Booking Admin cannot perform unauthorized account-management actions", () => {
+  const bookingAdmin = { role: "booking_admin", is_active: true };
+
+  // Blocked from foreign modules
+  assert.equal(canAccessAdminSection(bookingAdmin, "profiles", { adminModule: "users" }), false);
+  assert.equal(canAccessAdminSection(bookingAdmin, "providers", { adminModule: "providers" }), false);
+  assert.equal(canAccessAdminSection(bookingAdmin, "businesses", { adminModule: "business" }), false);
+  assert.equal(canAccessAdminSection(bookingAdmin, "subscriptions", { adminModule: "subscriptions" }), false);
+  assert.equal(canAccessAdminSection(bookingAdmin, "reports", { adminModule: "reports" }), false);
+  assert.equal(canAccessAdminSection(bookingAdmin, "blocked-accounts"), false);
+  assert.equal(canAccessAdminSection(bookingAdmin, "admin-management"), false);
+
+  // Blocked from account management controls in UI
+  assert.match(adminApp, /const blockAccount = \(row\) => \{[\s\S]*?!adminIsSuper && !\["users_admin", "provider_admin", "business_admin"\]\.includes\(access\?\.role\)/);
+  assert.match(adminApp, /canRemoveAccount=\{adminIsSuper \|\| \(access\?\.role === "users_admin"/);
+  assert.match(adminApp, /canRemoveProvider=\{adminIsSuper \|\| access\?\.role === "provider_admin"\}/);
+  assert.match(adminApp, /canRemoveBusiness=\{adminIsSuper \|\| access\?\.role === "business_admin"\}/);
+  assert.match(adminApp, /canFreezeSubscription=\{adminIsSuper \|\| access\?\.role === "subscription_admin"\}/);
+});
+
+test("Super Admin retains full administrative access across all sections", () => {
+  const superAdmin = { role: "super_admin", is_active: true };
+  const sections = [
+    ["overview", undefined],
+    ["profiles", { adminModule: "users" }],
+    ["providers", { adminModule: "providers" }],
+    ["businesses", { adminModule: "business" }],
+    ["subscriptions", { adminModule: "subscriptions" }],
+    ["bookings", { adminModule: "bookings" }],
+    ["reports", { adminModule: "reports" }],
+    ["blocked-accounts", undefined],
+    ["admin-management", undefined],
+  ];
+
+  for (const [sec, res] of sections) {
+    assert.equal(canAccessAdminSection(superAdmin, sec, res), true, `Super Admin should access ${sec}`);
+  }
+});
+
+test("Other specialized administrators retain their assigned scopes without privilege bleed", () => {
+  const usersAdmin = { role: "users_admin", is_active: true };
+  const providerAdmin = { role: "provider_admin", is_active: true };
+  const businessAdmin = { role: "business_admin", is_active: true };
+  const subscriptionAdmin = { role: "subscription_admin", is_active: true };
+
+  // Users Admin
+  assert.equal(canAccessAdminSection(usersAdmin, "profiles", { adminModule: "users" }), true);
+  assert.equal(canAccessAdminSection(usersAdmin, "bookings", { adminModule: "bookings" }), false);
+  assert.equal(canAccessAdminSection(usersAdmin, "businesses", { adminModule: "business" }), false);
+
+  // Provider Admin
+  assert.equal(canAccessAdminSection(providerAdmin, "providers", { adminModule: "providers" }), true);
+  assert.equal(canAccessAdminSection(providerAdmin, "bookings", { adminModule: "bookings" }), false);
+  assert.equal(canAccessAdminSection(providerAdmin, "profiles", { adminModule: "users" }), false);
+
+  // Business Admin
+  assert.equal(canAccessAdminSection(businessAdmin, "businesses", { adminModule: "business" }), true);
+  assert.equal(canAccessAdminSection(businessAdmin, "bookings", { adminModule: "bookings" }), false);
+  assert.equal(canAccessAdminSection(businessAdmin, "providers", { adminModule: "providers" }), false);
+
+  // Subscription Admin
+  assert.equal(canAccessAdminSection(subscriptionAdmin, "subscriptions", { adminModule: "subscriptions" }), true);
+  assert.equal(canAccessAdminSection(subscriptionAdmin, "bookings", { adminModule: "bookings" }), false);
+  assert.equal(canAccessAdminSection(subscriptionAdmin, "businesses", { adminModule: "business" }), false);
+});
+
+

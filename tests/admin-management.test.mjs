@@ -144,6 +144,8 @@ test("Forgotten Admin passwords use a recovery link and require a new password",
   assert.match(recoveryScript, /type: "recovery"/);
   assert.match(recoveryScript, /admin-recovery/);
   assert.match(recoveryScript, /SUPABASE_SERVICE_ROLE_KEY/);
+  assert.doesNotMatch(adminApp, /window\.location\.href\s*=\s*devRecoveryLink/);
+  assert.match(adminApp, /A password-reset link was sent/);
 });
 
 test("Secondary Admin access returns the assigned app role, not PostgreSQL current_role", () => {

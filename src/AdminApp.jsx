@@ -348,31 +348,150 @@ async function validateRecoveryEmail(email) {
   return payload.data?.recoveryLink || null;
 }
 
-function AdminPasswordRecoveryRequest({ onReturnToSignIn }) {
-  const [error, setError] = useState("");
+function AdminPasswordRecoveryRequest({ onReturnToSignIn, initialError = "" }) {
+  const [error, setError] = useState(initialError);
   const [sent, setSent] = useState(false);
+  const [sentEmail, setSentEmail] = useState("");
   const [sending, setSending] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
+  const [cooldownDone, setCooldownDone] = useState(false);
+  const [devLink, setDevLink] = useState(null);
+
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    setCooldownDone(false);
+    const timer = setInterval(() => {
+      setCooldown((prev) => {
+        if (prev <= 1) {
+          setError("");
+          setCooldownDone(true);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [cooldown]);
+
   const submit = async (event) => {
     event.preventDefault();
+    if (cooldown > 0) return;
     setError("");
+    setCooldownDone(false);
     const email = String(new FormData(event.currentTarget).get("email") || "").trim().toLowerCase();
-    let devRecoveryLink = null;
+    let localDevLink = null;
     try {
-      devRecoveryLink = await validateRecoveryEmail(email);
+      localDevLink = await validateRecoveryEmail(email);
+      if (localDevLink) setDevLink(localDevLink);
     } catch (validationError) {
       return setError(validationError instanceof Error ? validationError.message : "Enter the active Super Admin email.");
-    }
-    if (devRecoveryLink) {
-      window.location.href = devRecoveryLink;
-      return;
     }
     setSending(true);
     const { error: recoveryError } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: adminPasswordRecoveryUrl() });
     setSending(false);
-    if (recoveryError) return setError(adminAuthErrorMessage(recoveryError, "send the password-reset email"));
+    if (recoveryError) {
+      const match = recoveryError.message?.match(/after\s+(\d+)\s+seconds/i);
+      if (match) {
+        const secs = parseInt(match[1], 10) || 60;
+        setCooldown(secs);
+        return setError(`For security purposes, you can only request this after ${secs} seconds. Check your Gmail inbox and spam folder if you already requested one.`);
+      }
+      return setError(adminAuthErrorMessage(recoveryError, "send the password-reset email"));
+    }
+    setSentEmail(email);
     setSent(true);
   };
-  return <main className="ops-login"><section className="ops-login-panel"><Brand /><p className="ops-kicker">Password recovery</p><h1>Reset Admin password</h1><p>Enter the active Super Admin email. We will send a secure link to choose a new password.</p>{sent ? <><p className="ops-success" role="status">A password-reset link was sent. After setting a new password, return here and sign in.</p><button type="button" className="ops-button secondary" onClick={onReturnToSignIn}>Return to sign in</button></> : <form onSubmit={submit}><label>Super Admin email<input name="email" type="email" required autoComplete="email" placeholder="admin@gmail.com" /></label>{error ? <p className="ops-error" role="alert">{error}</p> : null}<button className="ops-button" disabled={sending}><Mail />{sending ? "Sending..." : "Send reset link"}</button><button type="button" className="ops-button secondary" onClick={onReturnToSignIn}>Return to sign in</button></form>}</section></main>;
+
+  if (sent) {
+    return (
+      <main className="ops-login">
+        <section className="ops-login-panel">
+          <Brand />
+          <p className="ops-kicker">Password recovery</p>
+          <h1>Check your email</h1>
+          <p className="ops-success" role="status">
+            A password-reset link was sent to <strong>{sentEmail}</strong>. Check your email, then return here and sign in.
+          </p>
+          <a
+            href="https://mail.google.com"
+            target="_blank"
+            rel="noreferrer"
+            className="ops-button"
+            style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "0.5rem", textDecoration: "none", marginBottom: "0.75rem" }}
+          >
+            <Mail /> Open Gmail
+          </a>
+          {import.meta.env.DEV && devLink ? (
+            <a
+              href={devLink}
+              className="ops-button secondary"
+              style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "0.5rem", textDecoration: "none", marginBottom: "0.75rem" }}
+            >
+              <KeyRound /> Reset password directly (Instant dev link)
+            </a>
+          ) : null}
+          <button type="button" className="ops-button secondary" onClick={onReturnToSignIn}>
+            Return to sign in
+          </button>
+        </section>
+      </main>
+    );
+  }
+
+  return (
+    <main className="ops-login">
+      <section className="ops-login-panel">
+        <Brand />
+        <p className="ops-kicker">Password recovery</p>
+        <h1>Reset Admin password</h1>
+        <p>Enter the active Super Admin email. We will send a secure link to choose a new password.</p>
+        <form onSubmit={submit}>
+          <label>
+            Choose Admin email
+            <input
+              name="email"
+              type="email"
+              list="admin-emails"
+              defaultValue="mdabdullah200211@gmail.com"
+              required
+              autoComplete="email"
+              placeholder="mdabdullah200211@gmail.com"
+            />
+            <datalist id="admin-emails">
+              <option value="mdabdullah200211@gmail.com">mdabdullah200211@gmail.com (Super Admin)</option>
+            </datalist>
+          </label>
+          {cooldown > 0 ? (
+            <div style={{ margin: "1rem 0", padding: "0.75rem", background: "rgba(229,169,60,0.12)", border: "1px solid rgba(229,169,60,0.35)", borderRadius: "8px", fontSize: "0.88rem", lineHeight: "1.4" }}>
+              <p style={{ margin: "0 0 0.25rem 0", fontWeight: "bold", color: "var(--ops-accent, #e5a93c)" }}>
+                Rate-limit cooldown active ({cooldown}s remaining)
+              </p>
+              <p style={{ margin: 0 }}>
+                Supabase limits requests to 1 every 60 seconds. When the timer finishes, click the button below to send the email. Also check your Gmail inbox and Spam folder now.
+              </p>
+            </div>
+          ) : cooldownDone ? (
+            <p className="ops-success" role="status" style={{ margin: "0.75rem 0" }}>
+              ✓ Cooldown finished! Click <strong>Send reset link</strong> below to send the email.
+            </p>
+          ) : error ? (
+            <p className="ops-error" role="alert">{error}</p>
+          ) : null}
+          <button
+            className="ops-button"
+            disabled={sending || cooldown > 0}
+            style={cooldownDone ? { background: "var(--ops-accent, #e5a93c)", color: "#111", fontWeight: "bold" } : {}}
+          >
+            <Mail />
+            {sending ? "Sending..." : cooldown > 0 ? `Wait ${cooldown}s before sending` : cooldownDone ? "Send reset link now" : "Send reset link"}
+          </button>
+          <button type="button" className="ops-button secondary" onClick={onReturnToSignIn}>
+            Return to sign in
+          </button>
+        </form>
+      </section>
+    </main>
+  );
 }
 
 function AdminPasswordRecovery({ email, onReady }) {
@@ -389,21 +508,57 @@ function AdminPasswordRecovery({ email, onReady }) {
     const { error: updateError } = await supabase.auth.updateUser({ password });
     setSaving(false);
     if (updateError) return setError(updateError.message);
-    const url = new URL(window.location.href);
-    url.searchParams.delete("admin-recovery");
-    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+    const cleanUrl = new URL(window.location.href);
+    cleanUrl.searchParams.delete("admin-recovery");
+    cleanUrl.hash = "";
+    window.history.replaceState(null, "", `${cleanUrl.pathname}${cleanUrl.search}`);
     await supabase.auth.signOut();
     onReady();
   };
-  return <main className="ops-login"><section className="ops-login-panel"><Brand /><p className="ops-kicker">Password recovery</p><h1>Choose a new password</h1><p>Create a new password for {email}. You will then sign in with it.</p><form onSubmit={submit}><label>New password<input name="password" type="password" minLength="8" required autoComplete="new-password" /></label><label>Confirm password<input name="confirmation" type="password" minLength="8" required autoComplete="new-password" /></label>{error ? <p className="ops-error" role="alert">{error}</p> : null}<button className="ops-button" disabled={saving}><ShieldCheck />{saving ? "Saving..." : "Set new password"}</button></form></section></main>;
+  return (
+    <main className="ops-login">
+      <section className="ops-login-panel">
+        <Brand />
+        <p className="ops-kicker">Password recovery</p>
+        <h1>Choose a new password</h1>
+        <p>Create a new password for {email}. You will then sign in with it.</p>
+        <form onSubmit={submit}>
+          <label>
+            New password
+            <input name="password" type="password" minLength="8" required autoComplete="new-password" placeholder="At least 8 characters" />
+          </label>
+          <label>
+            Confirm password
+            <input name="confirmation" type="password" minLength="8" required autoComplete="new-password" placeholder="Confirm new password" />
+          </label>
+          {error ? <p className="ops-error" role="alert">{error}</p> : null}
+          <button className="ops-button" disabled={saving}>
+            <ShieldCheck />
+            {saving ? "Saving..." : "Set new password"}
+          </button>
+        </form>
+      </section>
+    </main>
+  );
 }
 
 function AccessGate({ onAccess }) {
   const [state, setState] = useState({ loading: true, session: null, profile: null, access: null });
   const [error, setError] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
   const [inviteSetup, setInviteSetup] = useState(() => new URLSearchParams(window.location.search).get("admin-invite") === "1");
-  const [recoverySetup, setRecoverySetup] = useState(() => new URLSearchParams(window.location.search).get("admin-recovery") === "1");
-  const [recoveryRequest, setRecoveryRequest] = useState(false);
+  const [recoverySetup, setRecoverySetup] = useState(() => {
+    if (typeof window === "undefined") return false;
+    const search = new URLSearchParams(window.location.search);
+    const hash = window.location.hash || "";
+    return search.get("admin-recovery") === "1" || hash.includes("type=recovery");
+  });
+  const hasExpiredLink = typeof window !== "undefined" && (
+    window.location.hash.includes("otp_expired") ||
+    window.location.hash.includes("error_code=otp_expired") ||
+    window.location.hash.includes("invalid+or+has+expired")
+  );
+  const [recoveryRequest, setRecoveryRequest] = useState(() => hasExpiredLink);
 
   useEffect(() => {
     let active = true;
@@ -433,16 +588,31 @@ function AccessGate({ onAccess }) {
   const login = async (event) => {
     event.preventDefault();
     setError("");
+    setSuccessMessage("");
     const values = new FormData(event.currentTarget);
     const { error: loginError } = await supabase.auth.signInWithPassword({ email: String(values.get("email") || "").trim().toLowerCase(), password: values.get("password") });
     if (loginError) setError(/invalid login credentials/i.test(loginError.message) ? "Email or password is incorrect. Use the Super Admin password set in Supabase Auth, or reset it with Forgot password." : loginError.message);
   };
 
   const allowed = hasAdminAccess(state.access);
+  const isSuperAdminEmail = state.session?.user?.email === "mdabdullah200211@gmail.com";
+  const canRecoverAdmin = state.session && (allowed || isSuperAdmin(state.access) || state.profile?.role === "SUPER_ADMIN" || isSuperAdminEmail);
+
   useEffect(() => { if (allowed && !inviteSetup && !recoverySetup) onAccess(state.session.user, state.profile, state.access); }, [allowed, inviteSetup, onAccess, recoverySetup, state.access, state.profile, state.session]);
 
   if (state.loading) return <div className="ops-gate"><RefreshCw className="ops-spin" /><p>Checking admin access...</p></div>;
-  if (allowed && recoverySetup) return <AdminPasswordRecovery email={state.session.user.email} onReady={() => setRecoverySetup(false)} />;
+  if (canRecoverAdmin && recoverySetup) {
+    return (
+      <AdminPasswordRecovery
+        email={state.session.user.email}
+        onReady={() => {
+          setRecoverySetup(false);
+          setRecoveryRequest(false);
+          setSuccessMessage("Your Super Admin password has been updated. Sign in with your new password.");
+        }}
+      />
+    );
+  }
   if (allowed && inviteSetup) return <AdminPasswordSetup email={state.session.user.email} onReady={() => setInviteSetup(false)} />;
   if (allowed) return <div className="ops-gate"><RefreshCw className="ops-spin" /><p>Opening operations...</p></div>;
   if (state.session) return (
@@ -450,12 +620,33 @@ function AccessGate({ onAccess }) {
       <section className="ops-login-panel"><Brand /><div className="ops-denied-icon"><ShieldCheck /></div><p className="ops-kicker">Access denied</p><h1>Admin access is required.</h1><p>{state.session.user.email} is signed in, but this account is not an active Admin.</p>{error ? <p className="ops-error">{error}</p> : null}<button className="ops-button" onClick={() => supabase.auth.signOut()}><LogOut /> Sign out</button><a href={PUBLIC_APP_URL}>Return to TourismuBD</a></section>
     </main>
   );
-  if (recoveryRequest) return <AdminPasswordRecoveryRequest onReturnToSignIn={() => setRecoveryRequest(false)} />;
+  if (recoveryRequest || hasExpiredLink) {
+    return (
+      <AdminPasswordRecoveryRequest
+        initialError={hasExpiredLink ? "This password-recovery link has expired or was already used. Request a new reset link below." : ""}
+        onReturnToSignIn={() => {
+          setRecoveryRequest(false);
+          if (hasExpiredLink) {
+            const cleanUrl = new URL(window.location.href);
+            cleanUrl.hash = "";
+            window.history.replaceState(null, "", `${cleanUrl.pathname}${cleanUrl.search}`);
+          }
+        }}
+      />
+    );
+  }
   return (
     <main className="ops-login">
       <section className="ops-login-panel">
         <Brand /><p className="ops-kicker">Restricted operations</p><h1>Admin sign in</h1><p>Use your approved Gmail or account email and password.</p>
-        <form onSubmit={login}><label>Email<input name="email" type="email" required autoComplete="username" placeholder="admin@gmail.com" /></label><label>Password<input name="password" type="password" required autoComplete="current-password" /></label>{error || recoverySetup ? <p className="ops-error" role="alert">{error || "This password-recovery link has expired or was already used. Request a new reset link, then open it first on this computer."}</p> : null}<button className="ops-button"><ShieldCheck /> Sign in securely</button><button type="button" className="ops-text-button" onClick={() => { setError(""); setRecoveryRequest(true); }}>Forgot password?</button></form>
+        <form onSubmit={login}>
+          <label>Email<input name="email" type="email" required autoComplete="username" placeholder="admin@gmail.com" /></label>
+          <label>Password<input name="password" type="password" required autoComplete="current-password" /></label>
+          {successMessage ? <p className="ops-success" role="status">{successMessage}</p> : null}
+          {error || recoverySetup ? <p className="ops-error" role="alert">{error || "This password-recovery link has expired or was already used. Request a new reset link, then open it first on this computer."}</p> : null}
+          <button className="ops-button"><ShieldCheck /> Sign in securely</button>
+          <button type="button" className="ops-text-button" onClick={() => { setError(""); setSuccessMessage(""); setRecoveryRequest(true); }}>Forgot password?</button>
+        </form>
         <a href={PUBLIC_APP_URL}>Return to TourismuBD</a>
       </section>
     </main>
@@ -2123,6 +2314,7 @@ function Operations({ user, profile, access, onSignOut, onAccessLost, bypassAuth
   };
 
   const blockAccount = (row) => {
+    if (!adminIsSuper && !["users_admin", "provider_admin", "business_admin"].includes(access?.role)) return setError("Only authorized administrators can block accounts.");
     const accountId = row._is_post ? (row.author_id || row.reported_post_owner_id) : (row.reported_post_owner_id || row.id);
     const table = (row._is_post || row.reported_post_owner_id) ? "profiles" : (resource.id === "blocked-accounts" ? row._blocked_table : resource.table);
     if (table === "profiles" && !canManageProfile(user.id, accountId)) return setError("You cannot suspend your own Admin account.");
@@ -2500,7 +2692,7 @@ function Operations({ user, profile, access, onSignOut, onAccessLost, bypassAuth
         {resource?.id === "places" ? <div className="ops-place-tabs" role="tablist" aria-label="Place visibility"><button role="tab" aria-selected={placeVisibilityFilter === "ALL"} className={placeVisibilityFilter === "ALL" ? "active" : ""} onClick={() => setPlaceVisibilityFilter("ALL")}><MapPin />All places</button><button role="tab" aria-selected={placeVisibilityFilter === "HIDDEN"} className={placeVisibilityFilter === "HIDDEN" ? "active" : ""} onClick={() => setPlaceVisibilityFilter("HIDDEN")}><EyeOff />Hied places</button></div> : null}
         {resource?.reportSection ? <div className="ops-place-tabs" role="tablist" aria-label="Report account status"><button role="tab" aria-selected={section === "reports"} className={section === "reports" ? "active" : ""} onClick={() => setSection("reports")}><AlertTriangle />Reports</button>{adminIsSuper ? <button role="tab" aria-selected={section === "removed-accounts"} className={section === "removed-accounts" ? "active" : ""} onClick={() => setSection("removed-accounts")}><BadgeCheck />Activate post</button> : visibleActivationResources.map((item) => <button role="tab" aria-selected={section === item.id} className={section === item.id ? "active" : ""} onClick={() => setSection(item.id)} key={item.id}><BadgeCheck />{item.label}</button>)}</div> : null}
         {section === "admin-management" && adminIsSuper ? <AdminManagement bypassAuth={bypassAuth} readOnly={!adminIsSuper} onNotice={notify} /> : null}
-        {resource ? <section className="ops-table-panel">{resource.businessSection && !resource.subscriptionSection && !resource.activation ? <div className="ops-provider-tabs ops-business-tabs" role="tablist" aria-label="Business management"><button role="tab" aria-selected={section === "businesses"} className={section === "businesses" ? "active" : ""} onClick={() => setSection("businesses")}><BriefcaseBusiness />Business accounts</button>{BUSINESS_RESOURCES.map((item) => { const Icon = item.icon; return <button role="tab" aria-selected={section === item.id} className={section === item.id ? "active" : ""} onClick={() => setSection(item.id)} key={item.id}><Icon />{item.label}</button>; })}</div> : null}{resource.table === "providers" && !resource.activation ? <div className="ops-provider-tabs" role="tablist" aria-label="Provider categories"><button role="tab" aria-selected={section === "providers"} className={section === "providers" ? "active" : ""} onClick={() => setSection("providers")}><Building2 />All providers</button>{PROVIDER_RESOURCES.map((item) => { const Icon = item.icon; return <button role="tab" aria-selected={section === item.id} className={section === item.id ? "active" : ""} onClick={() => setSection(item.id)} key={item.id}><Icon />{item.label}</button>; })}</div> : null}{resource.subscriptionSection && !resource.activation ? <div className="ops-subscription-tabs" role="tablist" aria-label="Subscription account types"><button role="tab" aria-selected={section === "subscriptions"} className={section === "subscriptions" ? "active" : ""} onClick={() => setSection("subscriptions")}><ClipboardCheck />Provider subscriptions</button><button role="tab" aria-selected={section === "business-subscriptions"} className={section === "business-subscriptions" ? "active" : ""} onClick={() => setSection("business-subscriptions")}><BriefcaseBusiness />Business accounts</button></div> : null}<div className="ops-table-tools"><div className="ops-table-filters"><label><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${resource.label.toLowerCase()}`} /></label>{resource.id === "places" ? <select aria-label="Filter by division" value={divisionFilter} onChange={(event) => { setDivisionFilter(event.target.value); setDistrictFilter(""); }}><option value="">All divisions</option>{divisionOptions.map((division) => <option value={division} key={division}>{division}</option>)}</select> : null}{resource.id === "places" ? <select aria-label="Filter by district" value={districtFilter} onChange={(event) => setDistrictFilter(event.target.value)}><option value="">All districts</option>{filteredDistrictOptions.map((district) => <option value={district.id} key={district.id}>{district.name}</option>)}</select> : null}{resource.id === "reports" ? <select aria-label="Filter by report status" value={reportStatusFilter} onChange={(event) => setReportStatusFilter(event.target.value)}><option value="OPEN">Open reports</option><option value="RESOLVED">Resolved reports</option><option value="ALL">All reports</option></select> : null}</div><div className="ops-table-actions">{resource.id === "places" ? <button className="ops-button" onClick={() => setPlaceEditor({ row: null })}><Plus /> Add place</button> : null}<button className="ops-icon-button" onClick={() => loadRows(resource)} title="Refresh" aria-label="Refresh records"><RefreshCw /></button></div></div>{bypassAuth && resource.table === "providers" ? <div className="ops-data-note"><ShieldCheck /><span>Protected provider accounts load through the localhost Admin server. The Supabase service-role key stays outside the browser.</span></div> : null}{error ? <div className="ops-alert" role="alert"><AlertTriangle /><span>{error}</span><button onClick={() => setError("")} aria-label="Dismiss error"><X /></button></div> : null}<div className="ops-table-wrap"><table><thead><tr>{resource.columns.map((column) => <th key={column}>{column.replaceAll("_", " ")}</th>)}<th>Actions</th></tr></thead><tbody>{loading ? <tr><td colSpan={resource.columns.length + 1} className="ops-empty">Loading records...</td></tr> : null}{!loading && !visibleRows.length ? <tr><td colSpan={resource.columns.length + 1} className="ops-empty">{resource.table === "providers" ? "No provider accounts are available to this session." : "No records found."}</td></tr> : null}{visibleRows.map((row) => { const self = resource.id === "profiles" && !canManageProfile(user.id, row.id); const placesSection = resource.id === "places"; const profilesSection = resource.table === "profiles" || resource.table === "businesses"; const providersSection = resource.table === "providers"; const providerSubscriptionSection = resource.table === "provider_subscriptions"; const bookingsSection = resource.id === "bookings"; const reportsSection = resource.id === "reports"; return <tr key={row._row_key || row[resource.primaryKey || "id"]}>{resource.columns.map((column) => <td key={column} title={show(row[column])}>{show(row[column])}</td>)}<td><div className="ops-row-actions">{resource.readonly ? <span className="ops-readonly"><ShieldCheck /> Read only</span> : row._publicPreview ? <><PublicProfileLink provider={row} /><button onClick={() => setProviderProfile(row)} title="View Admin details" aria-label="View Admin details"><Eye /></button></> : <>{bookingsSection && row.provider_record ? <><PublicProfileLink provider={row.provider_record} /><button onClick={() => setProviderProfile(row.provider_record)} title="View provider details" aria-label="View provider details"><Eye /></button><button onClick={() => setBookingHistory(row)} title="View booking history" aria-label="View booking history"><BookOpenCheck /></button></> : null}{reportsSection ? <button onClick={() => setReportDetails(row)} title="View report details" aria-label="View report details"><Eye /></button> : null}{providersSection || profilesSection ? <PublicProfileLink provider={row._is_post ? { user_id: row.author_id } : row} /> : null}{providerSubscriptionSection && row.provider_record ? <><PublicProfileLink provider={row.provider_record} /><button onClick={() => setProviderProfile(row.provider_record)} title="View Admin details" aria-label="View Admin details"><Eye /></button></> : null}{row._is_post ? <button onClick={() => setReportDetails(row)} title="View post and report details" aria-label="View post and report details"><Eye /></button> : profilesSection ? <button onClick={() => setTravelerProfile(row.profile || row)} title={resource.table === "businesses" ? "View business owner details" : "View user details"} aria-label={resource.table === "businesses" ? "View business owner details" : "View user details"}><Eye /></button> : null}{providersSection ? <button onClick={() => setProviderProfile(row)} title="View Admin details" aria-label="View Admin details"><Eye /></button> : null}{!bookingsSection ? <>{row._is_post ? null : <button onClick={() => placesSection ? setPlaceEditor({ row }) : setEditing(row)} title="Edit" aria-label="Edit record"><Pencil /></button>}{placesSection ? <button onClick={() => setPlaceStatus(row, row.status === "PUBLISHED" ? "HIDDEN" : "PUBLISHED")} title={row.status === "PUBLISHED" ? "Hide from public pages" : "Publish on public pages"} aria-label={row.status === "PUBLISHED" ? "Hide place" : "Publish place"}>{row.status === "PUBLISHED" ? <EyeOff /> : <Eye />}</button> : resource.remove ? <button onClick={() => remove(row)} disabled={self} title={self ? "You cannot suspend yourself" : "Remove from active use"} aria-label="Remove record"><Archive /></button> : null}{resource.activation ? <button className="danger ops-block-button" onClick={() => blockAccount(row)} disabled={self || (row._is_post && !canManageProfile(user.id, row.author_id || row.reported_post_owner_id))} title={self || (row._is_post && !canManageProfile(user.id, row.author_id || row.reported_post_owner_id)) ? "You cannot block yourself" : "Block account"} aria-label="Block record"><ShieldAlert /></button> : null}{resource.activation || row._is_post ? null : <button className="danger" onClick={() => resource.noDelete ? setError(resource.deleteReason) : setDeleting(row)} title={resource.noDelete ? resource.deleteReason : "Delete permanently"} aria-label="Delete record"><Trash2 /></button>}</> : null}</>}</div></td></tr>; })}</tbody></table></div><p className="ops-table-foot">Showing {visibleRows.length} of {rows.length} loaded records</p></section> : null}
+        {resource ? <section className="ops-table-panel">{resource.businessSection && !resource.subscriptionSection && !resource.activation ? <div className="ops-provider-tabs ops-business-tabs" role="tablist" aria-label="Business management"><button role="tab" aria-selected={section === "businesses"} className={section === "businesses" ? "active" : ""} onClick={() => setSection("businesses")}><BriefcaseBusiness />Business accounts</button>{BUSINESS_RESOURCES.map((item) => { const Icon = item.icon; return <button role="tab" aria-selected={section === item.id} className={section === item.id ? "active" : ""} onClick={() => setSection(item.id)} key={item.id}><Icon />{item.label}</button>; })}</div> : null}{resource.table === "providers" && !resource.activation ? <div className="ops-provider-tabs" role="tablist" aria-label="Provider categories"><button role="tab" aria-selected={section === "providers"} className={section === "providers" ? "active" : ""} onClick={() => setSection("providers")}><Building2 />All providers</button>{PROVIDER_RESOURCES.map((item) => { const Icon = item.icon; return <button role="tab" aria-selected={section === item.id} className={section === item.id ? "active" : ""} onClick={() => setSection(item.id)} key={item.id}><Icon />{item.label}</button>; })}</div> : null}{(resource.subscriptionSection || section === "frozen-subscriptions") ? <div className="ops-subscription-tabs" role="tablist" aria-label="Subscription account types"><button role="tab" aria-selected={section === "subscriptions"} className={section === "subscriptions" ? "active" : ""} onClick={() => setSection("subscriptions")}><ClipboardCheck />Provider subscriptions</button><button role="tab" aria-selected={section === "business-subscriptions"} className={section === "business-subscriptions" ? "active" : ""} onClick={() => setSection("business-subscriptions")}><BriefcaseBusiness />Business accounts</button>{canOpenSection("frozen-subscriptions") ? <button role="tab" aria-selected={section === "frozen-subscriptions"} className={section === "frozen-subscriptions" ? "active" : ""} onClick={() => setSection("frozen-subscriptions")}><BadgeCheck />Activate subscriptions</button> : null}</div> : null}<div className="ops-table-tools"><div className="ops-table-filters"><label><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${resource.label.toLowerCase()}`} /></label>{resource.id === "places" ? <select aria-label="Filter by division" value={divisionFilter} onChange={(event) => { setDivisionFilter(event.target.value); setDistrictFilter(""); }}><option value="">All divisions</option>{divisionOptions.map((division) => <option value={division} key={division}>{division}</option>)}</select> : null}{resource.id === "places" ? <select aria-label="Filter by district" value={districtFilter} onChange={(event) => setDistrictFilter(event.target.value)}><option value="">All districts</option>{filteredDistrictOptions.map((district) => <option value={district.id} key={district.id}>{district.name}</option>)}</select> : null}{resource.id === "reports" ? <select aria-label="Filter by report status" value={reportStatusFilter} onChange={(event) => setReportStatusFilter(event.target.value)}><option value="OPEN">Open reports</option><option value="RESOLVED">Resolved reports</option><option value="ALL">All reports</option></select> : null}</div><div className="ops-table-actions">{resource.id === "places" ? <button className="ops-button" onClick={() => setPlaceEditor({ row: null })}><Plus /> Add place</button> : null}<button className="ops-icon-button" onClick={() => loadRows(resource)} title="Refresh" aria-label="Refresh records"><RefreshCw /></button></div></div>{bypassAuth && resource.table === "providers" ? <div className="ops-data-note"><ShieldCheck /><span>Protected provider accounts load through the localhost Admin server. The Supabase service-role key stays outside the browser.</span></div> : null}{error ? <div className="ops-alert" role="alert"><AlertTriangle /><span>{error}</span><button onClick={() => setError("")} aria-label="Dismiss error"><X /></button></div> : null}<div className="ops-table-wrap"><table><thead><tr>{resource.columns.map((column) => <th key={column}>{column.replaceAll("_", " ")}</th>)}<th>Actions</th></tr></thead><tbody>{loading ? <tr><td colSpan={resource.columns.length + 1} className="ops-empty">Loading records...</td></tr> : null}{!loading && !visibleRows.length ? <tr><td colSpan={resource.columns.length + 1} className="ops-empty">{resource.table === "providers" ? "No provider accounts are available to this session." : "No records found."}</td></tr> : null}{visibleRows.map((row) => { const self = resource.id === "profiles" && !canManageProfile(user.id, row.id); const placesSection = resource.id === "places"; const profilesSection = resource.table === "profiles" || resource.table === "businesses"; const providersSection = resource.table === "providers"; const providerSubscriptionSection = resource.table === "provider_subscriptions"; const bookingsSection = resource.id === "bookings"; const reportsSection = resource.id === "reports"; return <tr key={row._row_key || row[resource.primaryKey || "id"]}>{resource.columns.map((column) => <td key={column} title={show(row[column])}>{show(row[column])}</td>)}<td><div className="ops-row-actions">{resource.readonly ? <span className="ops-readonly"><ShieldCheck /> Read only</span> : row._publicPreview ? <><PublicProfileLink provider={row} /><button onClick={() => setProviderProfile(row)} title="View Admin details" aria-label="View Admin details"><Eye /></button></> : <>{bookingsSection && row.provider_record ? <><PublicProfileLink provider={row.provider_record} /><button onClick={() => setProviderProfile(row.provider_record)} title="View provider details" aria-label="View provider details"><Eye /></button><button onClick={() => setBookingHistory(row)} title="View booking history" aria-label="View booking history"><BookOpenCheck /></button></> : null}{reportsSection ? <button onClick={() => setReportDetails(row)} title="View report details" aria-label="View report details"><Eye /></button> : null}{providersSection || profilesSection ? <PublicProfileLink provider={row._is_post ? { user_id: row.author_id } : row} /> : null}{providerSubscriptionSection && row.provider_record ? <><PublicProfileLink provider={row.provider_record} /><button onClick={() => setProviderProfile(row.provider_record)} title="View Admin details" aria-label="View Admin details"><Eye /></button></> : null}{row._is_post ? <button onClick={() => setReportDetails(row)} title="View post and report details" aria-label="View post and report details"><Eye /></button> : profilesSection ? <button onClick={() => setTravelerProfile(row.profile || row)} title={resource.table === "businesses" ? "View business owner details" : "View user details"} aria-label={resource.table === "businesses" ? "View business owner details" : "View user details"}><Eye /></button> : null}{providersSection ? <button onClick={() => setProviderProfile(row)} title="View Admin details" aria-label="View Admin details"><Eye /></button> : null}{!bookingsSection ? <>{row._is_post ? null : <button onClick={() => placesSection ? setPlaceEditor({ row }) : setEditing(row)} title="Edit" aria-label="Edit record"><Pencil /></button>}{placesSection ? <button onClick={() => setPlaceStatus(row, row.status === "PUBLISHED" ? "HIDDEN" : "PUBLISHED")} title={row.status === "PUBLISHED" ? "Hide from public pages" : "Publish on public pages"} aria-label={row.status === "PUBLISHED" ? "Hide place" : "Publish place"}>{row.status === "PUBLISHED" ? <EyeOff /> : <Eye />}</button> : resource.remove ? <button onClick={() => remove(row)} disabled={self} title={self ? "You cannot suspend yourself" : "Remove from active use"} aria-label="Remove record"><Archive /></button> : null}{resource.activation ? <button className="danger ops-block-button" onClick={() => blockAccount(row)} disabled={self || (row._is_post && !canManageProfile(user.id, row.author_id || row.reported_post_owner_id))} title={self || (row._is_post && !canManageProfile(user.id, row.author_id || row.reported_post_owner_id)) ? "You cannot block yourself" : "Block account"} aria-label="Block record"><ShieldAlert /></button> : null}{resource.activation || row._is_post ? null : <button className="danger" onClick={() => resource.noDelete ? setError(resource.deleteReason) : setDeleting(row)} title={resource.noDelete ? resource.deleteReason : "Delete permanently"} aria-label="Delete record"><Trash2 /></button>}</> : null}</>}</div></td></tr>; })}</tbody></table></div><p className="ops-table-foot">Showing {visibleRows.length} of {rows.length} loaded records</p></section> : null}
       </main>
       {editing ? <Editor resource={resource} row={editing} userId={user.id} bypassAuth={bypassAuth} onClose={() => setEditing(null)} onSaved={saved} /> : null}
       {placeEditor ? <PlaceEditor row={placeEditor.row} districts={districtOptions} bypassAuth={bypassAuth} onClose={() => setPlaceEditor(null)} onSaved={saved} /> : null}
@@ -2508,7 +2700,7 @@ function Operations({ user, profile, access, onSignOut, onAccessLost, bypassAuth
       {accountAction ? <AccountActionDialog resource={resource} row={accountAction} onClose={() => setAccountAction(null)} onConfirm={(row) => { setAccountAction(null); applyAccountAction(row); }} /> : null}
       {providerProfile ? <ProviderProfile provider={providerProfile} bypassAuth={bypassAuth} onClose={() => setProviderProfile(null)} /> : null}
       {bookingHistory ? <BookingHistoryDialog provider={bookingHistory} onClose={() => setBookingHistory(null)} onCancelBooking={adminIsSuper || access?.role === "booking_admin" ? cancelBooking : null} /> : null}
-      {reportDetails ? <ReportDetailsDialog report={reportDetails} readOnly={!adminIsSuper && !(access?.role === "users_admin" && !reportDetails.reported_provider_record && reportDetails.reported_post_owner_profile?.role === "TRAVELER" && !reportDetails.reported_post_owner_profile?.is_admin_only) && !(access?.role === "business_admin" && Boolean(reportDetails.reported_business_record)) && !(access?.role === "provider_admin" && Boolean(reportDetails.reported_provider_record)) && !(access?.role === "subscription_admin" && Boolean(reportDetails.reported_subscription_record)) && !(access?.role === "booking_admin" && Boolean(reportDetails.reported_booking_record))} canDeletePost={adminIsSuper || (access?.role === "users_admin" && !reportDetails.reported_provider_record && reportDetails.reported_post_owner_profile?.role === "TRAVELER" && !reportDetails.reported_post_owner_profile?.is_admin_only) || (access?.role === "business_admin" && Boolean(reportDetails.reported_business_record)) || (access?.role === "provider_admin" && Boolean(reportDetails.reported_provider_record)) || (access?.role === "subscription_admin" && Boolean(reportDetails.reported_subscription_record))} canRemoveAccount={adminIsSuper || (access?.role === "users_admin" && !reportDetails.reported_provider_record && reportDetails.reported_post_owner_profile?.role === "TRAVELER" && !reportDetails.reported_post_owner_profile?.is_admin_only)} canRemoveProvider={adminIsSuper || access?.role === "provider_admin"} canRemoveBusiness={adminIsSuper || access?.role === "business_admin"} canFreezeSubscription={adminIsSuper || access?.role === "subscription_admin"} canCancelBooking={adminIsSuper || access?.role === "booking_admin"} onClose={() => setReportDetails(null)} onViewProfile={setTravelerProfile} onViewProvider={setProviderProfile} onViewPost={setReportedPost} onLinkPost={linkReportedPost} onDeletePost={deleteReportedPost} onRemoveAccount={removeReportedPostOwner} onActivatePost={(post) => { setReportDetails(null); applyAccountAction(post); }} onBlockAccount={(post) => { setReportDetails(null); blockAccount(post); }} /> : null}
+      {reportDetails ? <ReportDetailsDialog report={reportDetails} readOnly={!adminIsSuper && !(access?.role === "users_admin" && !reportDetails.reported_provider_record && reportDetails.reported_post_owner_profile?.role === "TRAVELER" && !reportDetails.reported_post_owner_profile?.is_admin_only) && !(access?.role === "business_admin" && Boolean(reportDetails.reported_business_record)) && !(access?.role === "provider_admin" && Boolean(reportDetails.reported_provider_record)) && !(access?.role === "subscription_admin" && Boolean(reportDetails.reported_subscription_record)) && !(access?.role === "booking_admin" && Boolean(reportDetails.reported_booking_record))} canDeletePost={adminIsSuper || (access?.role === "users_admin" && !reportDetails.reported_provider_record && reportDetails.reported_post_owner_profile?.role === "TRAVELER" && !reportDetails.reported_post_owner_profile?.is_admin_only) || (access?.role === "business_admin" && Boolean(reportDetails.reported_business_record)) || (access?.role === "provider_admin" && Boolean(reportDetails.reported_provider_record)) || (access?.role === "subscription_admin" && Boolean(reportDetails.reported_subscription_record))} canRemoveAccount={adminIsSuper || (access?.role === "users_admin" && !reportDetails.reported_provider_record && reportDetails.reported_post_owner_profile?.role === "TRAVELER" && !reportDetails.reported_post_owner_profile?.is_admin_only)} canRemoveProvider={adminIsSuper || access?.role === "provider_admin"} canRemoveBusiness={adminIsSuper || access?.role === "business_admin"} canFreezeSubscription={adminIsSuper || access?.role === "subscription_admin"} canCancelBooking={adminIsSuper || access?.role === "booking_admin"} onClose={() => setReportDetails(null)} onViewProfile={setTravelerProfile} onViewProvider={setProviderProfile} onViewPost={setReportedPost} onLinkPost={linkReportedPost} onDeletePost={deleteReportedPost} onRemoveAccount={removeReportedPostOwner} onActivatePost={(post) => { setReportDetails(null); applyAccountAction(post); }} onBlockAccount={adminIsSuper || ["users_admin", "provider_admin", "business_admin"].includes(access?.role) ? (post) => { setReportDetails(null); blockAccount(post); } : null} /> : null}
       {reportAccountAction ? <ReportAccountRemovalDialog report={reportAccountAction} onClose={() => setReportAccountAction(null)} onConfirm={(report) => { setReportAccountAction(null); suspendReportedPostOwner(report); }} /> : null}
       {reportedPost ? <ReportedPostDialog report={reportedPost} bypassAuth={bypassAuth} onClose={() => setReportedPost(null)} /> : null}
       {travelerProfile ? <TravelerProfile profile={travelerProfile} onClose={() => setTravelerProfile(null)} /> : null}
