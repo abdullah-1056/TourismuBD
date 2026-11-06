@@ -179,9 +179,10 @@ test("admin access and self-lockout guards are strict", () => {
 });
 
 test("Secondary Admin navigation is limited to one module and Reports", () => {
-  assert.deepEqual(ADMIN_ROLES, ["users_admin", "business_admin", "provider_admin", "subscription_admin", "booking_admin"]);
+  assert.deepEqual(ADMIN_ROLES, ["users_admin", "business_admin", "provider_admin", "subscription_admin", "booking_admin", "media_admin"]);
   const users = { role: "users_admin", is_active: true };
   const business = { role: "business_admin", is_active: true };
+  const media = { role: "media_admin", is_active: true };
   const superAdmin = { role: "super_admin", is_active: true };
   assert.equal(canAccessAdminSection(users, "overview"), true);
   assert.equal(canAccessAdminSection(users, "reports"), true);
@@ -189,11 +190,19 @@ test("Secondary Admin navigation is limited to one module and Reports", () => {
   assert.equal(canAccessAdminSection({ role: "business_admin", is_active: true }, "reports"), true);
   assert.equal(canAccessAdminSection({ role: "subscription_admin", is_active: true }, "reports"), false);
   assert.equal(canAccessAdminSection({ role: "booking_admin", is_active: true }, "reports"), false);
+  assert.equal(canAccessAdminSection(media, "reports"), false);
+  assert.equal(canAccessAdminSection(media, "overview"), false);
+  assert.equal(canAccessAdminSection(media, "profiles", { adminModule: "users" }), false);
+  assert.equal(canAccessAdminSection(media, "providers", { adminModule: "providers" }), false);
+  assert.equal(canAccessAdminSection(media, "businesses", { adminModule: "business" }), false);
+  assert.equal(canAccessAdminSection(media, "media", { adminModule: "media" }), true);
+  assert.equal(canAccessAdminSection(users, "media", { adminModule: "media" }), false);
   assert.equal(canAccessAdminSection(users, "admin-management"), false);
   assert.equal(canAccessAdminSection(users, "profiles", { adminModule: "users" }), true);
   assert.equal(canAccessAdminSection(users, "providers", { adminModule: "providers" }), false);
   assert.equal(canAccessAdminSection(business, "businesses", { adminModule: "business" }), true);
   assert.equal(canAccessAdminSection(superAdmin, "admin-management"), true);
+  assert.equal(canAccessAdminSection(superAdmin, "media", { adminModule: "media" }), true);
 });
 
 test("Admin Management is Super-Admin-only and uses server-side Admin functions", () => {

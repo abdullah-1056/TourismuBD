@@ -6,6 +6,7 @@ const ADMIN_ROLES = new Set([
   "provider_admin",
   "subscription_admin",
   "booking_admin",
+  "media_admin",
 ]);
 
 function corsHeaders(request: Request) {

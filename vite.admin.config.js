@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 
@@ -28,8 +29,18 @@ const ADMIN_EDITABLE_FIELDS = {
   reports: new Set(["status", "admin_note", "resolved_by", "resolved_at", "social_post_id"]),
   social_posts: new Set(["is_hidden"]),
 };
-const FILTER_COLUMNS = new Set(["id", "provider_id", "user_id", "type", "role", "status"]);
+const FILTER_COLUMNS = new Set(["id", "slug", "provider_id", "user_id", "type", "role", "status"]);
 const PUBLIC_PROFILE_SOURCE_FIELDS = "id,full_name,role,avatar_url,profile_photo_urls,bio,district,email,phone,blood_group,gender,working_place,hobby,present_address,permanent_address,followers_visible";
+
+function formatSupabaseError(error, url) {
+  const host = url ? url.replace(/^https?:\/\//, "").replace(/\/.*$/, "") : "Supabase";
+  const message = error instanceof Error ? error.message : String(error || "");
+  const causeCode = error?.cause?.code;
+  if (message === "fetch failed" || causeCode === "ENOTFOUND" || causeCode === "EAI_AGAIN" || causeCode === "ECONNREFUSED") {
+    return `Could not reach ${host}. Your free Supabase project is likely paused due to 7 days of inactivity. Restore it in your Supabase dashboard or set VITE_ADMIN_AUTH_BYPASS=true in .env for local dev.`;
+  }
+  return message || "Could not reach Supabase.";
+}
 
 function localAdminDataPlugin(env) {
   const url = env.VITE_SUPABASE_URL;
@@ -58,18 +69,114 @@ function localAdminDataPlugin(env) {
         const postMediaPreview = parsed.pathname === "/__tourismubd-admin/post-media";
         const adminRpc = parsed.pathname === "/__tourismubd-admin/rpc";
         const recoveryEmailCheck = parsed.pathname === "/__tourismubd-admin/recovery-email";
-        if (!profilePreview && !postMediaPreview && !adminRpc && !recoveryEmailCheck && parsed.pathname !== "/__tourismubd-admin/data") return next();
+        const mediaSync = parsed.pathname === "/__tourismubd-admin/media-sync";
+        const uploadMedia = parsed.pathname === "/__tourismubd-admin/upload";
+        if (!profilePreview && !postMediaPreview && !adminRpc && !recoveryEmailCheck && !mediaSync && !uploadMedia && parsed.pathname !== "/__tourismubd-admin/data") return next();
         response.setHeader("Content-Type", "application/json");
         response.setHeader("Cache-Control", "no-store");
         const origin = request.headers.origin;
-        const allowedOrigins = profilePreview
+        const allowedOrigins = (profilePreview || mediaSync || uploadMedia)
           ? ["http://127.0.0.1:5175", "http://localhost:5175", "http://127.0.0.1:5176", "http://localhost:5176"]
           : ["http://127.0.0.1:5176", "http://localhost:5176"];
         if (origin && !allowedOrigins.includes(origin)) {
           response.statusCode = 403;
           return response.end(JSON.stringify({ error: "Local Admin requests must come from the Admin origin." }));
         }
-        if (profilePreview && origin) response.setHeader("Access-Control-Allow-Origin", origin);
+        if ((profilePreview || mediaSync || uploadMedia) && origin) response.setHeader("Access-Control-Allow-Origin", origin);
+
+        if (mediaSync) {
+          response.setHeader("Access-Control-Allow-Origin", origin || "*");
+          if (request.method === "OPTIONS") {
+            response.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+            response.setHeader("Access-Control-Allow-Headers", "Content-Type");
+            response.statusCode = 204;
+            return response.end();
+          }
+          const mediaFilePath = resolve(import.meta.dirname, "public/data/custom-media.json");
+          if (request.method === "GET") {
+            let content = { places: {}, galleries: {}, banners: {}, water: {} };
+            try {
+              if (existsSync(mediaFilePath)) {
+                content = JSON.parse(readFileSync(mediaFilePath, "utf8"));
+              }
+            } catch {}
+            return response.end(JSON.stringify({ data: content }));
+          }
+          if (request.method === "POST") {
+            const chunks = [];
+            for await (const chunk of request) chunks.push(chunk);
+            try {
+              const payload = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+              let current = { places: {}, galleries: {}, banners: {}, water: {} };
+              if (existsSync(mediaFilePath)) {
+                try { current = JSON.parse(readFileSync(mediaFilePath, "utf8")); } catch {}
+              }
+              if (payload.type && payload.key && payload.value !== undefined) {
+                if (!current[payload.type]) current[payload.type] = {};
+                current[payload.type][payload.key] = payload.value;
+              } else if (payload.customMedia) {
+                current = { ...current, ...payload.customMedia };
+              }
+              mkdirSync(resolve(import.meta.dirname, "public/data"), { recursive: true });
+              writeFileSync(mediaFilePath, JSON.stringify(current, null, 2), "utf8");
+              return response.end(JSON.stringify({ data: { success: true, media: current } }));
+            } catch (err) {
+              response.statusCode = 400;
+              return response.end(JSON.stringify({ error: err.message || "Failed to save media." }));
+            }
+          }
+          response.statusCode = 405;
+          return response.end(JSON.stringify({ error: "Method not allowed for media sync." }));
+        }
+
+        if (uploadMedia) {
+          response.setHeader("Access-Control-Allow-Origin", origin || "*");
+          if (request.method === "OPTIONS") {
+            response.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+            response.setHeader("Access-Control-Allow-Headers", "Content-Type");
+            response.statusCode = 204;
+            return response.end();
+          }
+          if (request.method !== "POST") {
+            response.statusCode = 405;
+            return response.end(JSON.stringify({ error: "Only POST method is supported for image upload." }));
+          }
+          const chunks = [];
+          for await (const chunk of request) chunks.push(chunk);
+          try {
+            const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+            const dataUrl = body?.dataUrl || "";
+            const originalName = body?.filename || "upload.jpg";
+            if (!dataUrl.startsWith("data:image/")) {
+              response.statusCode = 400;
+              return response.end(JSON.stringify({ error: "Invalid image data format." }));
+            }
+            const match = dataUrl.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/);
+            if (!match) {
+              response.statusCode = 400;
+              return response.end(JSON.stringify({ error: "Could not parse base64 image data." }));
+            }
+            const rawExt = match[1].toLowerCase().replace("jpeg", "jpg");
+            const ext = ["jpg", "png", "webp", "gif"].includes(rawExt) ? rawExt : "jpg";
+            const base64Content = match[2];
+            const buffer = Buffer.from(base64Content, "base64");
+            
+            const uploadDir = resolve(import.meta.dirname, "public/images/uploads");
+            mkdirSync(uploadDir, { recursive: true });
+            
+            const safeBaseName = originalName.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 30) || "img";
+            const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 8)}-${safeBaseName}.${ext}`;
+            const fullPath = resolve(uploadDir, fileName);
+            writeFileSync(fullPath, buffer);
+            
+            const publicUrl = `/images/uploads/${fileName}`;
+            return response.end(JSON.stringify({ data: { url: publicUrl, fileName } }));
+          } catch (err) {
+            response.statusCode = 500;
+            return response.end(JSON.stringify({ error: err.message || "Failed to process image upload." }));
+          }
+        }
+
         if (!admin) {
           response.statusCode = 503;
           return response.end(JSON.stringify({ error: "Add SUPABASE_SERVICE_ROLE_KEY to .env, then restart the Admin server to load protected provider accounts." }));
@@ -105,7 +212,7 @@ function localAdminDataPlugin(env) {
             return response.end(JSON.stringify({ data: { valid: true } }));
           } catch (error) {
             response.statusCode = 502;
-            return response.end(JSON.stringify({ error: error instanceof Error ? error.message : "Could not reach Supabase." }));
+            return response.end(JSON.stringify({ error: formatSupabaseError(error, admin.url) }));
           }
         }
         if (adminRpc) {
@@ -323,7 +430,7 @@ function localAdminDataPlugin(env) {
             return response.end(JSON.stringify({ data: result }));
           } catch (error) {
             response.statusCode = 502;
-            return response.end(JSON.stringify({ error: error instanceof Error ? error.message : "Could not reach Supabase." }));
+            return response.end(JSON.stringify({ error: formatSupabaseError(error, admin.url) }));
           }
         }
         if (profilePreview) {
@@ -346,7 +453,7 @@ function localAdminDataPlugin(env) {
             return response.end(JSON.stringify({ data: profile ? { ...profile, follower_count: 0, rating_average: null, rating_count: 0 } : null }));
           } catch (error) {
             response.statusCode = 502;
-            return response.end(JSON.stringify({ error: error instanceof Error ? error.message : "Could not reach Supabase." }));
+            return response.end(JSON.stringify({ error: formatSupabaseError(error, admin.url) }));
           }
         }
         if (postMediaPreview) {
@@ -370,7 +477,7 @@ function localAdminDataPlugin(env) {
             return response.end(JSON.stringify({ url: `${admin.url}/storage/v1${result.signedURL}` }));
           } catch (error) {
             response.statusCode = 502;
-            return response.end(JSON.stringify({ error: error instanceof Error ? error.message : "Could not reach Supabase." }));
+            return response.end(JSON.stringify({ error: formatSupabaseError(error, admin.url) }));
           }
         }
         const table = parsed.searchParams.get("table") || "";
@@ -398,7 +505,9 @@ function localAdminDataPlugin(env) {
             }
             const key = parsed.searchParams.get("key") || "id";
             const recordId = parsed.searchParams.get("recordId") || "";
-            if (method !== "POST" && (key !== "id" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(recordId))) {
+            const isAllowedSlugKey = table === "places" && key === "slug" && /^[a-z0-9_-]+$/i.test(recordId);
+            const isValidUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(recordId);
+            if (method !== "POST" && !isAllowedSlugKey && (key !== "id" || !isValidUuid)) {
               response.statusCode = 400;
               return response.end(JSON.stringify({ error: "A valid Admin record key is required." }));
             }
@@ -433,7 +542,7 @@ function localAdminDataPlugin(env) {
           response.end(JSON.stringify({ data: Array.isArray(result) ? result : [] }));
         } catch (error) {
           response.statusCode = 502;
-          response.end(JSON.stringify({ error: error instanceof Error ? error.message : "Could not reach Supabase." }));
+          response.end(JSON.stringify({ error: formatSupabaseError(error, admin.url) }));
         }
       });
     },
@@ -444,6 +553,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, import.meta.dirname, "");
   return {
     root: "admin",
+    publicDir: resolve(import.meta.dirname, "public"),
     envDir: resolve(import.meta.dirname),
     plugins: [react(), localAdminDataPlugin(env)],
     server: { host: "127.0.0.1", port: 5176, strictPort: true, fs: { allow: [resolve(import.meta.dirname)] } },

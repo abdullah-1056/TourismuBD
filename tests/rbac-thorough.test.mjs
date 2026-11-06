@@ -14,6 +14,7 @@ const adminApp = readFileSync(new URL("../src/AdminApp.jsx", import.meta.url), "
 const adminLib = readFileSync(new URL("../src/lib/admin.js", import.meta.url), "utf8");
 const migration085 = readFileSync(new URL("../supabase/migrations/085_secondary_admin_management.sql", import.meta.url), "utf8");
 const migration110 = readFileSync(new URL("../supabase/migrations/110_booking_admin_business_read.sql", import.meta.url), "utf8");
+const migration111 = readFileSync(new URL("../supabase/migrations/111_media_admin_role.sql", import.meta.url), "utf8");
 const inviteFunction = readFileSync(new URL("../supabase/functions/invite-secondary-admin/index.ts", import.meta.url), "utf8");
 const purgeFunction = readFileSync(new URL("../supabase/functions/purge-deactivated-accounts/index.ts", import.meta.url), "utf8");
 
@@ -23,6 +24,7 @@ const providerAdmin = Object.freeze({ role: "provider_admin", is_active: true })
 const businessAdmin = Object.freeze({ role: "business_admin", is_active: true });
 const subscriptionAdmin = Object.freeze({ role: "subscription_admin", is_active: true });
 const bookingAdmin = Object.freeze({ role: "booking_admin", is_active: true });
+const mediaAdmin = Object.freeze({ role: "media_admin", is_active: true });
 
 // -----------------------------------------------------------------------------
 // 1. Super Admin Tests
@@ -327,24 +329,31 @@ test("7. Security: Direct URL rejection, inactive rejection, Edge Function prote
 // 8. Preservation Tests: Roles, Accounts, Workflows, and Architecture
 // -----------------------------------------------------------------------------
 test("8. Preservation: All six roles exist, database constraints intact, zero duplicate systems", () => {
-  // Exactly the 5 secondary roles defined in ADMIN_ROLES
+  // All secondary roles defined in ADMIN_ROLES
   assert.deepEqual(
     [...ADMIN_ROLES].sort(),
-    ["booking_admin", "business_admin", "provider_admin", "subscription_admin", "users_admin"]
+    ["booking_admin", "business_admin", "media_admin", "provider_admin", "subscription_admin", "users_admin"]
   );
 
-  // All 6 roles have human-friendly display labels
+  // All roles have human-friendly display labels
   assert.equal(ADMIN_ROLE_LABELS.super_admin, "Super Admin");
   assert.equal(ADMIN_ROLE_LABELS.users_admin, "Users Admin");
   assert.equal(ADMIN_ROLE_LABELS.provider_admin, "Provider Admin");
   assert.equal(ADMIN_ROLE_LABELS.business_admin, "Business Admin");
   assert.equal(ADMIN_ROLE_LABELS.subscription_admin, "Subscription Admin");
   assert.equal(ADMIN_ROLE_LABELS.booking_admin, "Booking Admin");
+  assert.equal(ADMIN_ROLE_LABELS.media_admin, "Media Admin");
 
-  // Database admin_accounts table check constraint enforces the 5 secondary roles
+  // Database admin_accounts table check constraint enforces the secondary roles
   assert.match(
     migration085,
     /'users_admin'[\s\S]*'business_admin'[\s\S]*'provider_admin'[\s\S]*'subscription_admin'[\s\S]*'booking_admin'/
+  );
+
+  // Migration 111 includes media_admin
+  assert.match(
+    migration111,
+    /'media_admin'/
   );
 
   // can_access_admin_module handles all operational modules without external RBAC tables
@@ -353,4 +362,17 @@ test("8. Preservation: All six roles exist, database constraints intact, zero du
   assert.match(migration085, /when module_name = 'providers' then private\.current_admin_role\(\) = 'provider_admin'/);
   assert.match(migration085, /when module_name = 'subscriptions' then private\.current_admin_role\(\) = 'subscription_admin'/);
   assert.match(migration085, /when module_name = 'bookings' then private\.current_admin_role\(\) = 'booking_admin'/);
+  assert.match(migration111, /when module_name = 'media' then private\.current_admin_role\(\) = 'media_admin'/);
+
+  // media_admin is strictly isolated to media
+  assert.equal(canAccessAdminSection(mediaAdmin, "media", { adminModule: "media" }), true);
+  assert.equal(canAccessAdminSection(mediaAdmin, "overview"), false);
+  assert.equal(canAccessAdminSection(mediaAdmin, "profiles", { adminModule: "users" }), false);
+  assert.equal(canAccessAdminSection(mediaAdmin, "providers", { adminModule: "providers" }), false);
+  assert.equal(canAccessAdminSection(mediaAdmin, "businesses", { adminModule: "business" }), false);
+  assert.equal(canAccessAdminSection(mediaAdmin, "subscriptions", { adminModule: "subscriptions" }), false);
+  assert.equal(canAccessAdminSection(mediaAdmin, "bookings", { adminModule: "bookings" }), false);
+  assert.equal(canAccessAdminSection(mediaAdmin, "reports", { adminModule: "reports" }), false);
+  assert.equal(canAccessAdminSection(mediaAdmin, "blocked-accounts"), false);
+  assert.equal(canAccessAdminSection(mediaAdmin, "admin-management"), false);
 });

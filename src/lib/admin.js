@@ -10,6 +10,7 @@ export const ADMIN_ROLES = Object.freeze([
   "provider_admin",
   "subscription_admin",
   "booking_admin",
+  "media_admin",
 ]);
 
 export const ADMIN_ROLE_LABELS = Object.freeze({
@@ -19,14 +20,16 @@ export const ADMIN_ROLE_LABELS = Object.freeze({
   provider_admin: "Provider Admin",
   subscription_admin: "Subscription Admin",
   booking_admin: "Booking Admin",
+  media_admin: "Media Admin",
 });
 
-const MODULE_ROLE = Object.freeze({
+export const MODULE_ROLE = Object.freeze({
   users: "users_admin",
   business: "business_admin",
   providers: "provider_admin",
   subscriptions: "subscription_admin",
   bookings: "booking_admin",
+  media: "media_admin",
 });
 
 export function hasAdminAccess(access) {
@@ -39,6 +42,9 @@ export function isSuperAdmin(access) {
 
 export function canAccessAdminSection(access, section, resource) {
   if (!hasAdminAccess(access)) return false;
+  if (access?.role === "media_admin") {
+    return section === "media" || resource?.id === "media" || resource?.adminModule === "media";
+  }
   if (section === "overview") return true;
   if (section === "reports") return isSuperAdmin(access) || ["users_admin", "provider_admin", "business_admin"].includes(access?.role);
   if (section === "blocked-accounts") return isSuperAdmin(access) || ["users_admin", "provider_admin", "business_admin"].includes(access?.role);

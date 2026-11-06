@@ -2,12 +2,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   Archive,
+  ArrowDown,
+  ArrowUp,
   BadgeCheck,
   BookOpenCheck,
   BriefcaseBusiness,
   Building2,
   CalendarCheck,
+  Camera,
   CarFront,
+  Check,
   CircleUserRound,
   ClipboardCheck,
   Database,
@@ -15,6 +19,7 @@ import {
   Eye,
   EyeOff,
   ExternalLink,
+  Image as ImageIcon,
   KeyRound,
   LayoutDashboard,
   Link,
@@ -33,6 +38,7 @@ import {
   ShieldCheck,
   Star,
   Trash2,
+  UploadCloud,
   UsersRound,
   UserCog,
   Waves,
@@ -40,8 +46,22 @@ import {
 } from "lucide-react";
 import { ADMIN_ROLES, ADMIN_ROLE_LABELS, adminRemovalPatch, buildPlacePayload, canAccessAdminSection, canManageProfile, groupReportedPostRows, hasAdminAccess, isSuperAdmin, PLACE_STATUSES, providerTypeLabel, slugifyPlaceName, sortDestinationRows } from "./lib/admin.js";
 import { supabase } from "./lib/admin-supabase.js";
+import {
+  districts as staticDistricts,
+  places as staticPlaces,
+  waterListings as staticWaterListings,
+  getCustomPlaceImage,
+  getCustomWaterImage,
+  getSystemBanner,
+  saveCustomPlaceImage,
+  saveCustomWaterImage,
+  saveCustomSystemBanner,
+  syncCustomMediaFromServer,
+} from "./data/tourism.js";
+import { getPlaceGallery, saveCustomPlaceGallery } from "./data/place-galleries.js";
 
 const RESOURCES = [
+  { id: "media", label: "Media", table: "places", adminModule: "media", mediaSection: true, icon: ImageIcon, columns: ["name", "category", "district_id", "image_url"] },
   { id: "profiles", label: "Users", table: "profiles", adminModule: "users", profileRole: "TRAVELER", publicProfilesOnly: true, icon: UsersRound, columns: ["full_name", "email", "phone", "district", "role", "status", "updated_at"], remove: { status: "SUSPENDED" }, noDelete: true, deleteReason: "Auth users require server-side deletion." },
   { id: "providers", label: "Providers", table: "providers", adminModule: "providers", icon: Building2, columns: ["owner_name", "provider_type", "district", "contact_email", "account_status", "public_status"], remove: { account_status: "REMOVED", public_status: "HIDDEN" } },
   { id: "businesses", label: "Business", table: "businesses", adminModule: "business", businessSection: true, icon: BriefcaseBusiness, columns: ["owner_name", "business_name", "district", "contact_email", "contact_phone", "account_status", "public_status"], remove: { account_status: "REMOVED", public_status: "HIDDEN" }, noDelete: true, deleteReason: "Business accounts are linked to Auth users. Hide or remove them from active use instead." },
@@ -97,7 +117,7 @@ const ADMIN_EDITABLE_FIELDS = {
   business_products: new Set(["name", "description", "price_bdt", "stock_quantity", "image_url", "status"]),
   places: new Set(["district_id", "name", "slug", "upazila_or_area", "category", "latitude", "longitude", "short_description", "best_time", "how_to_reach", "practical_tips", "image_url", "status"]),
   place_relationships: new Set(["relationship_type", "travel_minutes"]),
-  water_bodies: new Set(["name", "type", "is_sundarbans", "status"]),
+  water_bodies: new Set(["name", "type", "is_sundarbans", "status", "image_url"]),
   provider_subscriptions: new Set(["status", "current_period_start", "current_period_end", "grace_until", "last_payment_at", "admin_note"]),
   bookings: new Set(["status", "cancelled_by", "cancelled_at", "cancellation_reason"]),
   saved_trips: new Set(["name"]),
@@ -332,17 +352,25 @@ function adminPasswordRecoveryUrl() {
 
 function adminAuthErrorMessage(error, action) {
   const message = typeof error?.message === "string" ? error.message.trim() : "";
+  if (message === "fetch failed" || /failed to fetch/i.test(message)) {
+    return "Could not reach Supabase. Your free Supabase project is likely paused due to 7 days of inactivity. Restore it in your Supabase dashboard or set VITE_ADMIN_AUTH_BYPASS=true in .env for local dev.";
+  }
   if (message && message !== "{}") return message;
   return `Supabase could not ${action} because its outgoing email service is unavailable. Configure SMTP in Authentication > SMTP Settings, then try again.`;
 }
 
 async function validateRecoveryEmail(email) {
   if (!import.meta.env.DEV) return null;
-  const response = await fetch("/__tourismubd-admin/recovery-email", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email }),
-  });
+  let response;
+  try {
+    response = await fetch("/__tourismubd-admin/recovery-email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+  } catch (networkErr) {
+    throw new Error("Could not reach local Admin dev server (port 5176). Ensure 'npm run dev:admin' is running.");
+  }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.error || "Enter the active Super Admin email.");
   return payload.data?.recoveryLink || null;
@@ -696,6 +724,209 @@ function Editor({ resource, row, userId, bypassAuth, onClose, onSaved }) {
   );
 }
 
+function ImageUploader({
+  currentUrl = "",
+  onImageSelected,
+  label = "Picture",
+  previewHeight = 160,
+  bucket = "system-media",
+}) {
+  const [mode, setMode] = useState("file");
+  const [urlInput, setUrlInput] = useState(currentUrl || "");
+  const [previewUrl, setPreviewUrl] = useState(currentUrl || "");
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState("");
+  const [dragActive, setDragActive] = useState(false);
+  const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    setUrlInput(currentUrl || "");
+    setPreviewUrl(currentUrl || "");
+  }, [currentUrl]);
+
+  const handleFile = async (file) => {
+    if (!file) return;
+    setError("");
+    const validTypes = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+    if (!validTypes.includes(file.type)) {
+      setError("Please choose a JPG, PNG, WebP, or GIF image.");
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setError("Image size must be less than 10MB.");
+      return;
+    }
+
+    setUploading(true);
+
+    try {
+      const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
+      const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}.${ext}`;
+      const filePath = `uploads/${fileName}`;
+
+      if (supabase?.storage) {
+        try {
+          const { error: uploadError } = await supabase.storage
+            .from(bucket)
+            .upload(filePath, file, { cacheControl: "3600", upsert: true, contentType: file.type });
+
+          if (!uploadError) {
+            const publicUrlData = supabase.storage.from(bucket).getPublicUrl(filePath);
+            const finalUrl = publicUrlData.data?.publicUrl;
+            if (finalUrl) {
+              setPreviewUrl(finalUrl);
+              setUrlInput(finalUrl);
+              onImageSelected?.(finalUrl);
+              setUploading(false);
+              return;
+            }
+          }
+        } catch {}
+      }
+
+      // Try local admin server upload endpoint for lightweight URL
+      try {
+        const reader = new FileReader();
+        const dataUrl = await new Promise((resolve, reject) => {
+          reader.onload = (e) => resolve(e.target.result);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+
+        const res = await fetch("/__tourismubd-admin/upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ dataUrl, filename: file.name }),
+        });
+
+        if (res.ok) {
+          const json = await res.json();
+          if (json.data?.url) {
+            setPreviewUrl(json.data.url);
+            setUrlInput(json.data.url);
+            onImageSelected?.(json.data.url);
+            setUploading(false);
+            return;
+          }
+        }
+
+        // Fallback to data URL if local endpoint also fails
+        setPreviewUrl(dataUrl);
+        setUrlInput(dataUrl);
+        onImageSelected?.(dataUrl);
+        setUploading(false);
+      } catch {
+        setError("Upload failed. Please try again.");
+        setUploading(false);
+      }
+    } catch (err) {
+      setError(err?.message || "Upload failed. Please try again.");
+      setUploading(false);
+    }
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setDragActive(false);
+    if (e.dataTransfer?.files?.[0]) {
+      handleFile(e.dataTransfer.files[0]);
+    }
+  };
+
+  const handleUrlChange = (val) => {
+    setUrlInput(val);
+    setPreviewUrl(val.trim());
+    setError("");
+    onImageSelected?.(val.trim());
+  };
+
+  return (
+    <div className="ops-image-uploader">
+      <div className="ops-uploader-tabs" role="tablist">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === "file"}
+          className={`ops-uploader-tab ${mode === "file" ? "active" : ""}`}
+          onClick={() => setMode("file")}
+        >
+          <UploadCloud size={14} /> Upload File
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === "url"}
+          className={`ops-uploader-tab ${mode === "url" ? "active" : ""}`}
+          onClick={() => setMode("url")}
+        >
+          <Link size={14} /> Paste Image URL
+        </button>
+      </div>
+
+      {mode === "file" ? (
+        <div
+          className={`ops-dropzone ${dragActive ? "drag-active" : ""} ${uploading ? "uploading" : ""}`}
+          onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
+          onDragLeave={() => setDragActive(false)}
+          onDrop={handleDrop}
+          onClick={() => fileInputRef.current?.click()}
+        >
+          <input
+            type="file"
+            ref={fileInputRef}
+            style={{ display: "none" }}
+            accept="image/jpeg,image/png,image/webp,image/gif"
+            onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
+          />
+          <UploadCloud className="ops-dropzone-icon" size={26} />
+          <p className="ops-dropzone-primary">
+            {uploading ? "Uploading to storage..." : "Drag & drop an image here, or click to browse"}
+          </p>
+          <span className="ops-dropzone-hint">Supports JPG, PNG, WebP up to 10MB</span>
+        </div>
+      ) : (
+        <div className="ops-url-input-wrap">
+          <input
+            type="url"
+            value={urlInput}
+            onChange={(e) => handleUrlChange(e.target.value)}
+            placeholder="https://images.unsplash.com/... or Google Image link"
+            className="ops-image-url-field"
+          />
+        </div>
+      )}
+
+      {error ? <p className="ops-uploader-error">{error}</p> : null}
+
+      {previewUrl ? (
+        <div className="ops-uploader-preview-box">
+          <div className="ops-uploader-preview-img-wrap" style={{ maxHeight: `${previewHeight}px` }}>
+            <img
+              src={previewUrl}
+              alt="Preview"
+              onError={() => setError("Image could not be loaded from this URL.")}
+            />
+          </div>
+          <div className="ops-uploader-preview-bar">
+            <span className="ops-uploader-preview-label"><Check size={14} /> Image Selected</span>
+            <button
+              type="button"
+              className="ops-uploader-clear-btn"
+              onClick={() => {
+                setPreviewUrl("");
+                setUrlInput("");
+                onImageSelected?.("");
+              }}
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function PlaceEditor({ row, districts, bypassAuth, onClose, onSaved }) {
   const dialogRef = useRef(null);
   const [form, setForm] = useState(() => ({
@@ -763,7 +994,14 @@ function PlaceEditor({ row, districts, bypassAuth, onClose, onSaved }) {
           <label>Category<input value={form.category} onChange={(event) => update("category", event.target.value)} /></label>
           <label>Latitude<input type="number" step="any" min="-90" max="90" value={form.latitude} onChange={(event) => update("latitude", event.target.value)} required /></label>
           <label>Longitude<input type="number" step="any" min="-180" max="180" value={form.longitude} onChange={(event) => update("longitude", event.target.value)} required /></label>
-          <label className="wide">Image URL<input type="url" value={form.image_url} onChange={(event) => update("image_url", event.target.value)} placeholder="https://..." /></label>
+          <div className="wide ops-form-uploader-field">
+            <label>Cover picture (Upload file or paste URL)</label>
+            <ImageUploader
+              currentUrl={form.image_url}
+              onImageSelected={(url) => update("image_url", url)}
+              label="Cover picture"
+            />
+          </div>
           <label className="wide">Short description<textarea value={form.short_description} onChange={(event) => update("short_description", event.target.value)} rows="3" /></label>
           <label>Best time<textarea value={form.best_time} onChange={(event) => update("best_time", event.target.value)} rows="3" /></label>
           <label>How to reach<textarea value={form.how_to_reach} onChange={(event) => update("how_to_reach", event.target.value)} rows="3" /></label>
@@ -1333,13 +1571,901 @@ function AdminManagement({ bypassAuth, readOnly = false, onNotice }) {
   </section>;
 }
 
+const DEFAULT_BANNERS = [
+  {
+    id: "hero_home",
+    title: "Homepage Hero Banner",
+    description: "The primary landscape banner featured at the top of the homepage hero section.",
+    defaultUrl: "/images/sylhet-waterway.png",
+  },
+  {
+    id: "banner_explore",
+    title: "Explore Places Banner",
+    description: "Featured visual banner on the Explore Destinations view.",
+    defaultUrl: "/images/sylhet-division-landscapes.png",
+  },
+  {
+    id: "banner_trip",
+    title: "Trip Planner & Route Banner",
+    description: "Header banner for the multi-day tour and route planner.",
+    defaultUrl: "/images/jaflong-river.png",
+  },
+  {
+    id: "banner_community",
+    title: "Traveler Community Banner",
+    description: "Atmospheric banner on community feeds and traveler shared stories.",
+    defaultUrl: "/images/gallery/water-3.jpg",
+  },
+  {
+    id: "banner_waterways",
+    title: "Rivers & Waterways Banner",
+    description: "Scenic banner for Bangladesh river systems, lakes, and water bodies.",
+    defaultUrl: "/images/gallery/water-1.jpg",
+  },
+];
+
+const MEDIA_TABS = [
+  { id: "places", label: "Destinations (Places)", icon: MapPin },
+  { id: "galleries", label: "Scenic Photo Galleries (6-9 Photos)", icon: Camera },
+  { id: "water", label: "Water Bodies & Nature", icon: Waves },
+  { id: "banners", label: "Hero & System Banners", icon: ImageIcon },
+  { id: "products", label: "Business & Products", icon: Package },
+];
+
+function MediaEditorDialog({ item, onClose, onSaved }) {
+  const dialogRef = useRef(null);
+  const [imageUrl, setImageUrl] = useState(item.imageUrl || item.image || item.image_url || "");
+  const [captionBn, setCaptionBn] = useState(item.captionBn || "");
+  const [captionEn, setCaptionEn] = useState(item.captionEn || "");
+  const [tagBn, setTagBn] = useState(item.tagBn || "");
+  const [tagEn, setTagEn] = useState(item.tagEn || "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    dialogRef.current?.showModal();
+  }, []);
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    if (!imageUrl.trim()) {
+      setError("Please provide an image either by uploading or pasting a URL.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      await onSaved({
+        ...item,
+        imageUrl: imageUrl.trim(),
+        captionBn,
+        captionEn,
+        tagBn,
+        tagEn,
+      });
+      onClose();
+    } catch (err) {
+      setError(err?.message || "Failed to save image changes.");
+      setSaving(false);
+    }
+  };
+
+  return (
+    <dialog ref={dialogRef} className="ops-dialog ops-media-dialog" onCancel={onClose}>
+      <form onSubmit={handleSave} className="ops-editor">
+        <button type="button" className="ops-icon-button ops-close" onClick={onClose} aria-label="Close dialog">
+          <X />
+        </button>
+        <p className="ops-kicker">Media management · {item.typeLabel || "Picture"}</p>
+        <h2>{item.title || "Update picture"}</h2>
+        {item.subtitle ? <p className="ops-media-dialog-subtitle">{item.subtitle}</p> : null}
+
+        <div className="ops-media-dialog-uploader">
+          <ImageUploader
+            currentUrl={imageUrl}
+            onImageSelected={(url) => {
+              setImageUrl(url);
+              setError("");
+            }}
+            label="Picture"
+            previewHeight={200}
+          />
+        </div>
+
+        {item.isGalleryPhoto ? (
+          <div className="ops-form-grid" style={{ marginTop: "1rem" }}>
+            <label>
+              Caption (বাংলা)
+              <input
+                value={captionBn}
+                onChange={(e) => setCaptionBn(e.target.value)}
+                placeholder="যেমন: আঁচরঙ্গা দিঘির শান্ত ও স্নিগ্ধ জলরাশি"
+              />
+            </label>
+            <label>
+              Caption (English)
+              <input
+                value={captionEn}
+                onChange={(e) => setCaptionEn(e.target.value)}
+                placeholder="e.g. Peaceful waters of Achranga Dighi"
+              />
+            </label>
+            <label>
+              Tag (বাংলা)
+              <input
+                value={tagBn}
+                onChange={(e) => setTagBn(e.target.value)}
+                placeholder="যেমন: শান্ত জলরাশি"
+              />
+            </label>
+            <label>
+              Tag (English)
+              <input
+                value={tagEn}
+                onChange={(e) => setTagEn(e.target.value)}
+                placeholder="e.g. Calm Waters"
+              />
+            </label>
+          </div>
+        ) : null}
+
+        {error ? <p className="ops-error" role="alert">{error}</p> : null}
+
+        <div className="ops-dialog-actions">
+          <button type="button" className="ops-button secondary" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="submit" className="ops-button" disabled={saving}>
+            <Pencil /> {saving ? "Saving..." : "Save changes"}
+          </button>
+        </div>
+      </form>
+    </dialog>
+  );
+}
+
+function getPlaceCoverImage(p) {
+  if (!p) return "/images/sylhet-waterway.png";
+  const custom = getCustomPlaceImage(p.slug || p.id);
+  if (custom) return custom;
+  if (p.image_url && !p.image_url.includes("sylhet-waterway")) return p.image_url;
+  if (p.image && !p.image.includes("sylhet-waterway")) return p.image;
+  const gallery = getPlaceGallery(p);
+  return gallery[0]?.url || p.image_url || p.image || "/images/sylhet-waterway.png";
+}
+
+function MediaManager({ bypassAuth = false, onNotice, readOnly = false }) {
+  const [activeTab, setActiveTab] = useState("places");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [places, setPlaces] = useState(() =>
+    staticPlaces.map((p) => ({
+      id: p.id,
+      name: p.name,
+      slug: p.slug,
+      category: p.category,
+      district_id: p.districtId || p.district,
+      image_url: getPlaceCoverImage(p),
+      status: p.status || "PUBLISHED",
+    }))
+  );
+  const [waterBodies, setWaterBodies] = useState(() =>
+    (staticWaterListings || []).map((w, idx) => ({
+      id: w.id || `wb-${idx}`,
+      name: w.name,
+      type: w.type || "Water body",
+      district: w.district || "",
+      image_url: w.image || "/images/gallery/water-1.jpg",
+      status: "PUBLISHED",
+    }))
+  );
+  const [products, setProducts] = useState([]);
+  const [banners, setBanners] = useState(() =>
+    DEFAULT_BANNERS.map((b) => ({
+      ...b,
+      imageUrl: getSystemBanner(b.id, b.defaultUrl),
+    }))
+  );
+  const [loading, setLoading] = useState(false);
+  const [selectedGallerySlug, setSelectedGallerySlug] = useState("achranga-dighi");
+  const [editingItem, setEditingItem] = useState(null);
+
+  const loadAllMedia = useCallback(async () => {
+    try {
+      await syncCustomMediaFromServer();
+    } catch {}
+
+    // 1. Load Places
+    try {
+      let loadedPlaces = [];
+      if (!bypassAuth && supabase) {
+        const { data, error } = await supabase
+          .from("places")
+          .select("id, name, slug, category, district_id, image_url, status")
+          .order("name");
+        if (!error && data?.length) {
+          loadedPlaces = data.map((p) => ({
+            ...p,
+            image_url: getPlaceCoverImage(p),
+          }));
+        }
+      }
+      if (!loadedPlaces.length) {
+        loadedPlaces = staticPlaces.map((p) => ({
+          id: p.id,
+          name: p.name,
+          slug: p.slug,
+          category: p.category,
+          district_id: p.districtId || p.district,
+          image_url: getPlaceCoverImage(p),
+          status: p.status || "PUBLISHED",
+        }));
+      }
+      setPlaces(loadedPlaces);
+    } catch {
+      setPlaces(staticPlaces.map((p) => ({
+        id: p.id,
+        name: p.name,
+        slug: p.slug,
+        category: p.category,
+        district_id: p.districtId || p.district,
+        image_url: getPlaceCoverImage(p),
+        status: p.status || "PUBLISHED",
+      })));
+    }
+
+    // 2. Load Water Bodies
+    try {
+      let loadedWater = [];
+      if (!bypassAuth && supabase) {
+        const { data, error } = await supabase
+          .from("water_bodies")
+          .select("id, name, type, district, image_url, status")
+          .order("name");
+        if (!error && data?.length) {
+          loadedWater = data;
+        }
+      }
+      if (!loadedWater.length) {
+        loadedWater = (staticWaterListings || []).map((w, idx) => ({
+          id: w.id || `wb-${idx}`,
+          name: w.name,
+          type: w.type || "Water body",
+          district: w.district || "",
+          image_url: w.image || "/images/gallery/water-1.jpg",
+          status: "PUBLISHED",
+        }));
+      }
+      setWaterBodies(loadedWater);
+    } catch {
+      setWaterBodies([]);
+    }
+
+    // 3. Load Products
+    try {
+      if (!bypassAuth && supabase) {
+        const { data } = await supabase
+          .from("business_products")
+          .select("id, name, seller_name, price_bdt, image_url")
+          .limit(50);
+        if (data) setProducts(data);
+      }
+    } catch {
+      setProducts([]);
+    }
+
+    // 4. Load Banners
+    const bannerItems = DEFAULT_BANNERS.map((b) => ({
+      ...b,
+      imageUrl: getSystemBanner(b.id, b.defaultUrl),
+    }));
+    setBanners(bannerItems);
+
+    setLoading(false);
+  }, [bypassAuth]);
+
+  useEffect(() => {
+    loadAllMedia();
+  }, [loadAllMedia]);
+
+  const selectedPlace = useMemo(() => {
+    return places.find((p) => p.slug === selectedGallerySlug || p.id === selectedGallerySlug) || places[0];
+  }, [places, selectedGallerySlug]);
+
+  const currentGallery = useMemo(() => {
+    if (!selectedPlace) return [];
+    return getPlaceGallery(selectedPlace);
+  }, [selectedPlace]);
+
+  const filteredPlaces = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
+    if (!q) return places;
+    return places.filter(
+      (p) =>
+        p.name?.toLowerCase().includes(q) ||
+        p.category?.toLowerCase().includes(q) ||
+        p.district_id?.toLowerCase().includes(q)
+    );
+  }, [places, searchQuery]);
+
+  const filteredWater = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
+    if (!q) return waterBodies;
+    return waterBodies.filter(
+      (w) =>
+        w.name?.toLowerCase().includes(q) ||
+        w.type?.toLowerCase().includes(q) ||
+        w.district?.toLowerCase().includes(q)
+    );
+  }, [waterBodies, searchQuery]);
+
+  const handleItemSaved = async (savedItem) => {
+    if (savedItem.isPlaceCover) {
+      const newUrl = savedItem.imageUrl;
+      saveCustomPlaceImage(savedItem.slug || savedItem.id, newUrl);
+
+      let dbUpdated = false;
+      if (!bypassAuth && supabase) {
+        try {
+          if (savedItem.id && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(savedItem.id)) {
+            const { error } = await supabase.from("places").update({ image_url: newUrl }).eq("id", savedItem.id);
+            if (!error) dbUpdated = true;
+          }
+          if (!dbUpdated && (savedItem.slug || savedItem.id)) {
+            const slug = savedItem.slug || savedItem.id;
+            const { error } = await supabase.from("places").update({ image_url: newUrl }).eq("slug", slug);
+            if (!error) dbUpdated = true;
+          }
+        } catch (err) {
+          console.warn("Direct Supabase update error:", err);
+        }
+      }
+
+      if (!dbUpdated) {
+        try {
+          const key = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(savedItem.id) ? "id" : "slug";
+          const recordId = key === "id" ? savedItem.id : (savedItem.slug || savedItem.id);
+          await mutateLocalAdminTable("places", "PATCH", key, recordId, { image_url: newUrl });
+          dbUpdated = true;
+        } catch (err) {
+          console.warn("Server admin mutation error:", err);
+        }
+      }
+
+      setPlaces((prev) =>
+        prev.map((p) => (p.id === savedItem.id || p.slug === savedItem.slug ? { ...p, image_url: newUrl } : p))
+      );
+      onNotice?.("Place cover picture updated successfully.");
+    } else if (savedItem.isGalleryPhoto) {
+      if (!selectedPlace) return;
+      const slug = selectedPlace.slug || selectedPlace.id;
+      let updatedGallery;
+      if (savedItem.isNewPhoto) {
+        updatedGallery = [
+          ...currentGallery,
+          {
+            url: savedItem.imageUrl,
+            fallbackUrl: savedItem.imageUrl,
+            captionBn: savedItem.captionBn || "",
+            captionEn: savedItem.captionEn || "",
+            tagBn: savedItem.tagBn || "",
+            tagEn: savedItem.tagEn || "",
+          },
+        ];
+      } else {
+        updatedGallery = currentGallery.map((photo, idx) => {
+          if (idx !== savedItem.galleryIndex) return photo;
+          return {
+            ...photo,
+            url: savedItem.imageUrl,
+            fallbackUrl: savedItem.imageUrl,
+            captionBn: savedItem.captionBn,
+            captionEn: savedItem.captionEn,
+            tagBn: savedItem.tagBn,
+            tagEn: savedItem.tagEn,
+          };
+        });
+      }
+      saveCustomPlaceGallery(slug, updatedGallery);
+      setPlaces((prev) => [...prev]);
+      onNotice?.("Scenic gallery photo updated successfully.");
+    } else if (savedItem.isWaterBody) {
+      const newUrl = savedItem.imageUrl;
+      saveCustomWaterImage(savedItem.id, newUrl);
+      if (!bypassAuth && supabase && savedItem.id && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(savedItem.id)) {
+        try {
+          await supabase.from("water_bodies").update({ image_url: newUrl }).eq("id", savedItem.id);
+        } catch {}
+      }
+      setWaterBodies((prev) =>
+        prev.map((w) => (w.id === savedItem.id ? { ...w, image_url: newUrl } : w))
+      );
+      onNotice?.("Water body picture updated successfully.");
+    } else if (savedItem.isBanner) {
+      saveCustomSystemBanner(savedItem.bannerId, savedItem.imageUrl);
+      setBanners((prev) =>
+        prev.map((b) => (b.id === savedItem.bannerId ? { ...b, imageUrl: savedItem.imageUrl } : b))
+      );
+      onNotice?.("System banner updated successfully.");
+    } else if (savedItem.isProduct) {
+      const newUrl = savedItem.imageUrl;
+      if (!bypassAuth && supabase && savedItem.id) {
+        try {
+          await supabase.from("business_products").update({ image_url: newUrl }).eq("id", savedItem.id);
+        } catch {}
+      }
+      setProducts((prev) =>
+        prev.map((p) => (p.id === savedItem.id ? { ...p, image_url: newUrl } : p))
+      );
+      onNotice?.("Product picture updated successfully.");
+    }
+  };
+
+  const handleMoveGalleryPhoto = (index, direction) => {
+    if (!selectedPlace) return;
+    const targetIdx = index + direction;
+    if (targetIdx < 0 || targetIdx >= currentGallery.length) return;
+    const next = [...currentGallery];
+    const [moved] = next.splice(index, 1);
+    next.splice(targetIdx, 0, moved);
+    saveCustomPlaceGallery(selectedPlace.slug || selectedPlace.id, next);
+    setPlaces((prev) => [...prev]);
+    onNotice?.("Photo order updated.");
+  };
+
+  const handleDeleteGalleryPhoto = (index) => {
+    if (!selectedPlace) return;
+    if (currentGallery.length <= 6) {
+      alert("A scenic gallery must maintain at least 6 photos to showcase the location properly.");
+      return;
+    }
+    if (!window.confirm("Remove this photo from the scenic gallery?")) return;
+    const next = currentGallery.filter((_, idx) => idx !== index);
+    saveCustomPlaceGallery(selectedPlace.slug || selectedPlace.id, next);
+    setPlaces((prev) => [...prev]);
+    onNotice?.("Photo removed from scenic gallery.");
+  };
+
+  return (
+    <section className="ops-table-panel ops-media-manager">
+      <div className="ops-media-toolbar">
+        <div className="ops-media-tabs" role="tablist" aria-label="Media sections">
+          {MEDIA_TABS.map((tab) => {
+            const Icon = tab.icon;
+            const active = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                role="tab"
+                aria-selected={active}
+                className={`ops-media-tab ${active ? "active" : ""}`}
+                onClick={() => {
+                  setActiveTab(tab.id);
+                  setSearchQuery("");
+                }}
+              >
+                <Icon size={16} />
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="ops-media-search-wrap">
+          {activeTab !== "banners" ? (
+            <label className="ops-media-search">
+              <Search size={15} />
+              <input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder={
+                  activeTab === "galleries"
+                    ? "Select or search destination..."
+                    : `Search ${activeTab}...`
+                }
+              />
+            </label>
+          ) : null}
+          <button
+            className="ops-icon-button"
+            onClick={loadAllMedia}
+            title="Refresh media"
+            aria-label="Refresh media"
+          >
+            <RefreshCw size={15} />
+          </button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="ops-media-loading">Loading media records...</div>
+      ) : null}
+
+      {!loading && activeTab === "places" ? (
+        <div className="ops-media-content">
+          <div className="ops-media-subhead">
+            <div>
+              <h3>Destination Cover Pictures</h3>
+              <p>Upload a file or paste any web/Google image URL for every tourist destination.</p>
+            </div>
+            <span className="ops-badge">{filteredPlaces.length} destinations</span>
+          </div>
+
+          <div className="ops-media-grid">
+            {filteredPlaces.map((place) => {
+              const gallery = getPlaceGallery(place);
+              const imgUrl = getPlaceCoverImage(place);
+              return (
+                <div key={place.id || place.slug} className="ops-media-card">
+                  <div className="ops-media-card-thumb">
+                    <img
+                      src={imgUrl}
+                      alt=""
+                      loading="lazy"
+                      onError={(e) => {
+                        e.currentTarget.onerror = null;
+                        e.currentTarget.src = gallery[0]?.fallbackUrl || "/images/sylhet-waterway.png";
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="ops-media-card-action-btn"
+                      onClick={() =>
+                        setEditingItem({
+                          id: place.id,
+                          slug: place.slug,
+                          title: place.name,
+                          subtitle: `${place.district_id || ""} · ${place.category || ""}`,
+                          typeLabel: "Destination Cover Picture",
+                          imageUrl: imgUrl,
+                          isPlaceCover: true,
+                        })
+                      }
+                      title="Change picture"
+                    >
+                      <Camera size={14} /> Change Picture
+                    </button>
+                  </div>
+                  <div className="ops-media-card-info">
+                    <h4>{place.name}</h4>
+                    <p>{place.district_id || "Bangladesh"} · {place.category || "Scenic spot"}</p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+
+      {!loading && activeTab === "galleries" ? (
+        <div className="ops-media-content">
+          <div className="ops-media-subhead">
+            <div>
+              <h3>Scenic Photo Galleries (Silent Beauty)</h3>
+              <p>Each destination features 6 to 9 silent beauty photos. Super Admins and Media Admins can replace, add, or reorder any photo.</p>
+            </div>
+            <div className="ops-place-select-wrap">
+              <label>Select Destination:</label>
+              <select
+                value={selectedPlace?.slug || selectedGallerySlug}
+                onChange={(e) => setSelectedGallerySlug(e.target.value)}
+                className="ops-gallery-place-select"
+              >
+                {places.map((p) => (
+                  <option key={p.slug || p.id} value={p.slug || p.id}>
+                    {p.name} ({p.district_id || "Bangladesh"})
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="ops-gallery-management-box">
+            <div className="ops-gallery-summary-bar">
+              <div>
+                <strong>{selectedPlace?.name} Gallery</strong>
+                <span className="ops-badge">
+                  {currentGallery.length} / 9 photos ({currentGallery.length >= 6 ? "Meets 6-photo minimum" : "Needs 6 photos"})
+                </span>
+              </div>
+              {currentGallery.length < 9 ? (
+                <button
+                  type="button"
+                  className="ops-button"
+                  onClick={() =>
+                    setEditingItem({
+                      title: `Add Photo to ${selectedPlace?.name} Gallery`,
+                      subtitle: "Upload a file or paste image URL with captions",
+                      typeLabel: "Scenic Gallery Photo",
+                      imageUrl: "",
+                      captionBn: "",
+                      captionEn: "",
+                      tagBn: "",
+                      tagEn: "",
+                      isGalleryPhoto: true,
+                      isNewPhoto: true,
+                    })
+                  }
+                >
+                  <Plus size={14} /> Add Gallery Photo
+                </button>
+              ) : null}
+            </div>
+
+            <div className="ops-gallery-grid">
+              {currentGallery.map((photo, idx) => (
+                <div key={idx} className="ops-gallery-card">
+                  <div className="ops-gallery-card-thumb">
+                    <img
+                      src={photo.url || photo.fallbackUrl}
+                      alt={photo.captionEn || `Photo ${idx + 1}`}
+                      onError={(e) => {
+                        e.currentTarget.src = photo.fallbackUrl || "/images/gallery/water-1.jpg";
+                      }}
+                    />
+                    <span className="ops-gallery-card-num">#{idx + 1}</span>
+                    <div className="ops-gallery-card-actions">
+                      <button
+                        type="button"
+                        onClick={() => handleMoveGalleryPhoto(idx, -1)}
+                        disabled={idx === 0}
+                        title="Move photo left/up"
+                        aria-label="Move photo up"
+                      >
+                        <ArrowUp size={13} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleMoveGalleryPhoto(idx, 1)}
+                        disabled={idx === currentGallery.length - 1}
+                        title="Move photo right/down"
+                        aria-label="Move photo down"
+                      >
+                        <ArrowDown size={13} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setEditingItem({
+                            title: `Edit Photo #${idx + 1} for ${selectedPlace?.name}`,
+                            subtitle: photo.tagBn || photo.tagEn || "",
+                            typeLabel: "Scenic Gallery Photo",
+                            imageUrl: photo.url,
+                            captionBn: photo.captionBn || "",
+                            captionEn: photo.captionEn || "",
+                            tagBn: photo.tagBn || "",
+                            tagEn: photo.tagEn || "",
+                            galleryIndex: idx,
+                            isGalleryPhoto: true,
+                          })
+                        }
+                        title="Edit picture & captions"
+                        aria-label="Edit photo"
+                      >
+                        <Pencil size={13} />
+                      </button>
+                      <button
+                        type="button"
+                        className="danger"
+                        onClick={() => handleDeleteGalleryPhoto(idx)}
+                        disabled={currentGallery.length <= 6}
+                        title={currentGallery.length <= 6 ? "Minimum 6 photos required" : "Delete photo"}
+                        aria-label="Delete photo"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="ops-gallery-card-details">
+                    <span className="ops-gallery-tag">{photo.tagBn || photo.tagEn || "শান্ত রূপ"}</span>
+                    <p className="ops-gallery-caption-bn">{photo.captionBn || "শান্ত ও স্নিগ্ধ প্রাকৃতিক দৃশ্য"}</p>
+                    <small className="ops-gallery-caption-en">{photo.captionEn || "Serene landscape"}</small>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {!loading && activeTab === "water" ? (
+        <div className="ops-media-content">
+          <div className="ops-media-subhead">
+            <div>
+              <h3>Water Bodies & Rivers</h3>
+              <p>Pictures of rivers, haors, lakes, and waterfalls across Bangladesh.</p>
+            </div>
+            <span className="ops-badge">{filteredWater.length} water bodies</span>
+          </div>
+
+          <div className="ops-media-grid">
+            {filteredWater.map((item) => {
+              const imgUrl = item.image_url || "/images/gallery/water-1.jpg";
+              return (
+                <div key={item.id} className="ops-media-card">
+                  <div className="ops-media-card-thumb">
+                    <img
+                      src={imgUrl}
+                      alt=""
+                      loading="lazy"
+                      onError={(e) => {
+                        e.currentTarget.onerror = null;
+                        e.currentTarget.src = "/images/gallery/water-1.jpg";
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="ops-media-card-action-btn"
+                      onClick={() =>
+                        setEditingItem({
+                          id: item.id,
+                          title: item.name,
+                          subtitle: `${item.type} · ${item.district || "Bangladesh"}`,
+                          typeLabel: "Water Body Picture",
+                          imageUrl: imgUrl,
+                          isWaterBody: true,
+                        })
+                      }
+                      title="Change picture"
+                    >
+                      <Camera size={14} /> Change Picture
+                    </button>
+                  </div>
+                  <div className="ops-media-card-info">
+                    <h4>{item.name}</h4>
+                    <p>{item.type} · {item.district || "Bangladesh"}</p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+
+      {!loading && activeTab === "banners" ? (
+        <div className="ops-media-content">
+          <div className="ops-media-subhead">
+            <div>
+              <h3>System Hero & Page Banners</h3>
+              <p>Update any high-visibility website banner, including the homepage hero image.</p>
+            </div>
+            <span className="ops-badge">{banners.length} banners</span>
+          </div>
+
+          <div className="ops-banners-list">
+            {banners.map((banner) => (
+              <div key={banner.id} className="ops-banner-card">
+                <div className="ops-banner-preview-box">
+                  <img
+                    src={banner.imageUrl || banner.defaultUrl}
+                    alt={banner.title}
+                    onError={(e) => {
+                      e.currentTarget.src = banner.defaultUrl;
+                    }}
+                  />
+                  <div className="ops-banner-overlay-badge">Live System Banner</div>
+                </div>
+                <div className="ops-banner-details">
+                  <h4>{banner.title}</h4>
+                  <p>{banner.description}</p>
+                  <div className="ops-banner-actions">
+                    <button
+                      type="button"
+                      className="ops-button"
+                      onClick={() =>
+                        setEditingItem({
+                          bannerId: banner.id,
+                          title: banner.title,
+                          subtitle: banner.description,
+                          typeLabel: "System Banner",
+                          imageUrl: banner.imageUrl || banner.defaultUrl,
+                          isBanner: true,
+                        })
+                      }
+                    >
+                      <Camera size={14} /> Change Banner Picture
+                    </button>
+                    {banner.imageUrl !== banner.defaultUrl ? (
+                      <button
+                        type="button"
+                        className="ops-button secondary"
+                        onClick={() => {
+                          saveCustomSystemBanner(banner.id, banner.defaultUrl);
+                          setBanners((prev) =>
+                            prev.map((b) => (b.id === banner.id ? { ...b, imageUrl: banner.defaultUrl } : b))
+                          );
+                          onNotice?.("Banner reset to default.");
+                        }}
+                      >
+                        Reset to Default
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {!loading && activeTab === "products" ? (
+        <div className="ops-media-content">
+          <div className="ops-media-subhead">
+            <div>
+              <h3>Business & Product Pictures</h3>
+              <p>Manage product listing and business catalog imagery.</p>
+            </div>
+            <span className="ops-badge">{products.length} products</span>
+          </div>
+
+          {!products.length ? (
+            <div className="ops-empty">No marketplace products found. Add products in the Business section to manage their imagery.</div>
+          ) : (
+            <div className="ops-media-grid">
+              {products.map((item) => {
+                const imgUrl = item.image_url || "/images/gallery/nature-1.jpg";
+                return (
+                  <div key={item.id} className="ops-media-card">
+                    <div className="ops-media-card-thumb">
+                      <img
+                        src={imgUrl}
+                        alt=""
+                        loading="lazy"
+                        onError={(e) => {
+                          e.currentTarget.onerror = null;
+                          e.currentTarget.src = "/images/gallery/nature-1.jpg";
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="ops-media-card-action-btn"
+                        onClick={() =>
+                          setEditingItem({
+                            id: item.id,
+                            title: item.name,
+                            subtitle: `${item.seller_name || "Seller"} · ৳${item.price_bdt || 0}`,
+                            typeLabel: "Product Picture",
+                            imageUrl: imgUrl,
+                            isProduct: true,
+                          })
+                        }
+                        title="Change picture"
+                      >
+                        <Camera size={14} /> Change Picture
+                      </button>
+                    </div>
+                    <div className="ops-media-card-info">
+                      <h4>{item.name}</h4>
+                      <p>{item.seller_name || "Seller"} · ৳{item.price_bdt || 0}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      ) : null}
+
+      {editingItem ? (
+        <MediaEditorDialog
+          item={editingItem}
+          onClose={() => setEditingItem(null)}
+          onSaved={handleItemSaved}
+        />
+      ) : null}
+    </section>
+  );
+}
+
 function Operations({ user, profile, access, onSignOut, onAccessLost, bypassAuth = false }) {
   const adminIsSuper = bypassAuth || isSuperAdmin(access);
+  const isMediaAdmin = access?.role === "media_admin";
   const canOpenSection = useCallback((nextSection) => {
+    if (isMediaAdmin) return nextSection === "media";
     if (nextSection === "blocked-accounts") return adminIsSuper || ["users_admin", "provider_admin", "business_admin"].includes(access?.role);
     return canAccessAdminSection(access, nextSection, RESOURCES.find((item) => item.id === nextSection));
-  }, [access, adminIsSuper, canAccessAdminSection]);
+  }, [access, adminIsSuper, isMediaAdmin, canAccessAdminSection]);
   const [section, setSectionState] = useState(() => {
+    if (isMediaAdmin) return "media";
     const saved = savedAdminSection();
     return canOpenSection(saved) ? saved : "overview";
   });
@@ -1371,6 +2497,7 @@ function Operations({ user, profile, access, onSignOut, onAccessLost, bypassAuth
   currentResource.current = resource;
 
   const setSection = useCallback((nextSection) => {
+    if (isMediaAdmin && nextSection !== "media") return;
     if (!isAdminSection(nextSection) || !canOpenSection(nextSection)) return;
     setSectionState(nextSection);
     try {
@@ -1379,7 +2506,7 @@ function Operations({ user, profile, access, onSignOut, onAccessLost, bypassAuth
         window.history.pushState({ ...currentState, tourismubdAdminSection: nextSection }, "", window.location.href);
       }
     } catch { /* Browser history can be unavailable. */ }
-  }, [canOpenSection]);
+  }, [canOpenSection, isMediaAdmin]);
 
   useEffect(() => {
     try {
@@ -1396,8 +2523,8 @@ function Operations({ user, profile, access, onSignOut, onAccessLost, bypassAuth
   }, [canOpenSection, section]);
 
   useEffect(() => {
-    if (!canOpenSection(section)) setSectionState("overview");
-  }, [canOpenSection, section]);
+    if (!canOpenSection(section)) setSectionState(isMediaAdmin ? "media" : "overview");
+  }, [canOpenSection, isMediaAdmin, section]);
 
   useEffect(() => {
     try { window.sessionStorage.setItem(ADMIN_SECTION_STORAGE_KEY, section); } catch { /* Session storage can be unavailable. */ }
@@ -1498,7 +2625,7 @@ function Operations({ user, profile, access, onSignOut, onAccessLost, bypassAuth
     setDistrictOptions(result.data || []);
   };
   const loadRows = async (target = resource) => {
-    if (!target || currentResource.current?.id !== target.id) return;
+    if (!target || target.id === "media" || isMediaAdmin || currentResource.current?.id !== target.id) return;
     const requestId = ++rowRequest.current;
     setLoading(true);
     setError("");
@@ -2684,15 +3811,16 @@ function Operations({ user, profile, access, onSignOut, onAccessLost, bypassAuth
 
   return (
     <div className={appClass}>
-      <aside className="ops-sidebar"><a href={PUBLIC_APP_URL} aria-label="Return to TourismuBD"><Brand /></a><nav aria-label="Admin navigation"><button className={section === "overview" ? "active" : ""} onClick={() => setSection("overview")}><LayoutDashboard /> Overview</button>{visibleSidebarResources.map((item) => { const Icon = item.icon; const active = item.id === "reports" ? Boolean(resource?.reportSection) : item.id === "providers" ? resource?.table === "providers" && !resource?.activation : item.id === "businesses" ? resource?.businessSection && !resource?.subscriptionSection && !resource?.activation : item.id === "subscriptions" ? resource?.subscriptionSection : section === item.id; return <button className={active ? "active" : ""} onClick={() => setSection(item.id)} key={item.id}><Icon /> {item.label}</button>; })}{adminIsSuper ? <button className={section === "admin-management" ? "active" : ""} onClick={() => setSection("admin-management")}><UserCog /> Admin Management</button> : null}</nav></aside>
+      <aside className="ops-sidebar"><a href={PUBLIC_APP_URL} aria-label="Return to TourismuBD"><Brand /></a><nav aria-label="Admin navigation">{!isMediaAdmin ? <button className={section === "overview" ? "active" : ""} onClick={() => setSection("overview")}><LayoutDashboard /> Overview</button> : null}{visibleSidebarResources.map((item) => { const Icon = item.icon; const active = item.id === "reports" ? Boolean(resource?.reportSection) : item.id === "providers" ? resource?.table === "providers" && !resource?.activation : item.id === "businesses" ? resource?.businessSection && !resource?.subscriptionSection && !resource?.activation : item.id === "subscriptions" ? resource?.subscriptionSection : section === item.id; return <button className={active ? "active" : ""} onClick={() => setSection(item.id)} key={item.id}><Icon /> {item.label}</button>; })}{adminIsSuper ? <button className={section === "admin-management" ? "active" : ""} onClick={() => setSection("admin-management")}><UserCog /> Admin Management</button> : null}</nav></aside>
       <main className="ops-main">
         {bypassAuth ? <div className="ops-dev-banner"><ShieldCheck /><span>Local development access. Production authentication remains enabled.</span></div> : null}
-        <header className="ops-topbar"><div><p className="ops-kicker">Operations console</p><h1>{section === "admin-management" ? "Admin Management" : resource?.table === "providers" ? "Providers" : resource?.subscriptionSection ? "Subscriptions" : resource?.businessSection ? "Business" : resource?.label || "Overview"}</h1></div><div className="ops-account"><span><b>{profile.full_name || "Admin"}</b><small>{ADMIN_ROLE_LABELS[access?.role] || "Super Admin"} · {user.email}</small></span>{!bypassAuth && adminIsSuper ? <button className="ops-icon-button" onClick={() => setPasswordDialogOpen(true)} title="Change password" aria-label="Change password"><KeyRound /></button> : null}{bypassAuth ? null : <button className="ops-icon-button" onClick={onSignOut} title="Sign out" aria-label="Sign out"><LogOut /></button>}</div></header>
+        <header className="ops-topbar"><div><p className="ops-kicker">Operations console</p><h1>{section === "admin-management" ? "Admin Management" : section === "media" ? "Media Management" : resource?.table === "providers" ? "Providers" : resource?.subscriptionSection ? "Subscriptions" : resource?.businessSection ? "Business" : resource?.label || "Overview"}</h1></div><div className="ops-account"><span><b>{profile.full_name || "Admin"}</b><small>{ADMIN_ROLE_LABELS[access?.role] || "Super Admin"} · {user.email}</small></span>{!bypassAuth && adminIsSuper ? <button className="ops-icon-button" onClick={() => setPasswordDialogOpen(true)} title="Change password" aria-label="Change password"><KeyRound /></button> : null}{bypassAuth ? null : <button className="ops-icon-button" onClick={onSignOut} title="Sign out" aria-label="Sign out"><LogOut /></button>}</div></header>
         {section === "overview" ? <section className="ops-overview"><div className="ops-stat-grid">{visibleSummary.map((item) => { const Icon = item.icon; return <button onClick={() => setSection(item.resource)} key={item.label}><span><Icon /></span><small>{item.label}</small><strong>{counts[item.resource] ?? "—"}</strong></button>; })}</div><div className="ops-note"><BookOpenCheck /><div><h2>Protected operations</h2><p>Changes are enforced by Supabase row-level security and written to Audit history. User authentication identities remain server-managed.</p></div></div></section> : null}
-        {resource?.id === "places" ? <div className="ops-place-tabs" role="tablist" aria-label="Place visibility"><button role="tab" aria-selected={placeVisibilityFilter === "ALL"} className={placeVisibilityFilter === "ALL" ? "active" : ""} onClick={() => setPlaceVisibilityFilter("ALL")}><MapPin />All places</button><button role="tab" aria-selected={placeVisibilityFilter === "HIDDEN"} className={placeVisibilityFilter === "HIDDEN" ? "active" : ""} onClick={() => setPlaceVisibilityFilter("HIDDEN")}><EyeOff />Hied places</button></div> : null}
+        {section === "media" ? <MediaManager bypassAuth={bypassAuth} onNotice={notify} readOnly={false} /> : null}
+        {resource?.id === "places" && section !== "media" ? <div className="ops-place-tabs" role="tablist" aria-label="Place visibility"><button role="tab" aria-selected={placeVisibilityFilter === "ALL"} className={placeVisibilityFilter === "ALL" ? "active" : ""} onClick={() => setPlaceVisibilityFilter("ALL")}><MapPin />All places</button><button role="tab" aria-selected={placeVisibilityFilter === "HIDDEN"} className={placeVisibilityFilter === "HIDDEN" ? "active" : ""} onClick={() => setPlaceVisibilityFilter("HIDDEN")}><EyeOff />Hied places</button></div> : null}
         {resource?.reportSection ? <div className="ops-place-tabs" role="tablist" aria-label="Report account status"><button role="tab" aria-selected={section === "reports"} className={section === "reports" ? "active" : ""} onClick={() => setSection("reports")}><AlertTriangle />Reports</button>{adminIsSuper ? <button role="tab" aria-selected={section === "removed-accounts"} className={section === "removed-accounts" ? "active" : ""} onClick={() => setSection("removed-accounts")}><BadgeCheck />Activate post</button> : visibleActivationResources.map((item) => <button role="tab" aria-selected={section === item.id} className={section === item.id ? "active" : ""} onClick={() => setSection(item.id)} key={item.id}><BadgeCheck />{item.label}</button>)}</div> : null}
         {section === "admin-management" && adminIsSuper ? <AdminManagement bypassAuth={bypassAuth} readOnly={!adminIsSuper} onNotice={notify} /> : null}
-        {resource ? <section className="ops-table-panel">{resource.businessSection && !resource.subscriptionSection && !resource.activation ? <div className="ops-provider-tabs ops-business-tabs" role="tablist" aria-label="Business management"><button role="tab" aria-selected={section === "businesses"} className={section === "businesses" ? "active" : ""} onClick={() => setSection("businesses")}><BriefcaseBusiness />Business accounts</button>{BUSINESS_RESOURCES.map((item) => { const Icon = item.icon; return <button role="tab" aria-selected={section === item.id} className={section === item.id ? "active" : ""} onClick={() => setSection(item.id)} key={item.id}><Icon />{item.label}</button>; })}</div> : null}{resource.table === "providers" && !resource.activation ? <div className="ops-provider-tabs" role="tablist" aria-label="Provider categories"><button role="tab" aria-selected={section === "providers"} className={section === "providers" ? "active" : ""} onClick={() => setSection("providers")}><Building2 />All providers</button>{PROVIDER_RESOURCES.map((item) => { const Icon = item.icon; return <button role="tab" aria-selected={section === item.id} className={section === item.id ? "active" : ""} onClick={() => setSection(item.id)} key={item.id}><Icon />{item.label}</button>; })}</div> : null}{(resource.subscriptionSection || section === "frozen-subscriptions") ? <div className="ops-subscription-tabs" role="tablist" aria-label="Subscription account types"><button role="tab" aria-selected={section === "subscriptions"} className={section === "subscriptions" ? "active" : ""} onClick={() => setSection("subscriptions")}><ClipboardCheck />Provider subscriptions</button><button role="tab" aria-selected={section === "business-subscriptions"} className={section === "business-subscriptions" ? "active" : ""} onClick={() => setSection("business-subscriptions")}><BriefcaseBusiness />Business accounts</button>{canOpenSection("frozen-subscriptions") ? <button role="tab" aria-selected={section === "frozen-subscriptions"} className={section === "frozen-subscriptions" ? "active" : ""} onClick={() => setSection("frozen-subscriptions")}><BadgeCheck />Activate subscriptions</button> : null}</div> : null}<div className="ops-table-tools"><div className="ops-table-filters"><label><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${resource.label.toLowerCase()}`} /></label>{resource.id === "places" ? <select aria-label="Filter by division" value={divisionFilter} onChange={(event) => { setDivisionFilter(event.target.value); setDistrictFilter(""); }}><option value="">All divisions</option>{divisionOptions.map((division) => <option value={division} key={division}>{division}</option>)}</select> : null}{resource.id === "places" ? <select aria-label="Filter by district" value={districtFilter} onChange={(event) => setDistrictFilter(event.target.value)}><option value="">All districts</option>{filteredDistrictOptions.map((district) => <option value={district.id} key={district.id}>{district.name}</option>)}</select> : null}{resource.id === "reports" ? <select aria-label="Filter by report status" value={reportStatusFilter} onChange={(event) => setReportStatusFilter(event.target.value)}><option value="OPEN">Open reports</option><option value="RESOLVED">Resolved reports</option><option value="ALL">All reports</option></select> : null}</div><div className="ops-table-actions">{resource.id === "places" ? <button className="ops-button" onClick={() => setPlaceEditor({ row: null })}><Plus /> Add place</button> : null}<button className="ops-icon-button" onClick={() => loadRows(resource)} title="Refresh" aria-label="Refresh records"><RefreshCw /></button></div></div>{bypassAuth && resource.table === "providers" ? <div className="ops-data-note"><ShieldCheck /><span>Protected provider accounts load through the localhost Admin server. The Supabase service-role key stays outside the browser.</span></div> : null}{error ? <div className="ops-alert" role="alert"><AlertTriangle /><span>{error}</span><button onClick={() => setError("")} aria-label="Dismiss error"><X /></button></div> : null}<div className="ops-table-wrap"><table><thead><tr>{resource.columns.map((column) => <th key={column}>{column.replaceAll("_", " ")}</th>)}<th>Actions</th></tr></thead><tbody>{loading ? <tr><td colSpan={resource.columns.length + 1} className="ops-empty">Loading records...</td></tr> : null}{!loading && !visibleRows.length ? <tr><td colSpan={resource.columns.length + 1} className="ops-empty">{resource.table === "providers" ? "No provider accounts are available to this session." : "No records found."}</td></tr> : null}{visibleRows.map((row) => { const self = resource.id === "profiles" && !canManageProfile(user.id, row.id); const placesSection = resource.id === "places"; const profilesSection = resource.table === "profiles" || resource.table === "businesses"; const providersSection = resource.table === "providers"; const providerSubscriptionSection = resource.table === "provider_subscriptions"; const bookingsSection = resource.id === "bookings"; const reportsSection = resource.id === "reports"; return <tr key={row._row_key || row[resource.primaryKey || "id"]}>{resource.columns.map((column) => <td key={column} title={show(row[column])}>{show(row[column])}</td>)}<td><div className="ops-row-actions">{resource.readonly ? <span className="ops-readonly"><ShieldCheck /> Read only</span> : row._publicPreview ? <><PublicProfileLink provider={row} /><button onClick={() => setProviderProfile(row)} title="View Admin details" aria-label="View Admin details"><Eye /></button></> : <>{bookingsSection && row.provider_record ? <><PublicProfileLink provider={row.provider_record} /><button onClick={() => setProviderProfile(row.provider_record)} title="View provider details" aria-label="View provider details"><Eye /></button><button onClick={() => setBookingHistory(row)} title="View booking history" aria-label="View booking history"><BookOpenCheck /></button></> : null}{reportsSection ? <button onClick={() => setReportDetails(row)} title="View report details" aria-label="View report details"><Eye /></button> : null}{providersSection || profilesSection ? <PublicProfileLink provider={row._is_post ? { user_id: row.author_id } : row} /> : null}{providerSubscriptionSection && row.provider_record ? <><PublicProfileLink provider={row.provider_record} /><button onClick={() => setProviderProfile(row.provider_record)} title="View Admin details" aria-label="View Admin details"><Eye /></button></> : null}{row._is_post ? <button onClick={() => setReportDetails(row)} title="View post and report details" aria-label="View post and report details"><Eye /></button> : profilesSection ? <button onClick={() => setTravelerProfile(row.profile || row)} title={resource.table === "businesses" ? "View business owner details" : "View user details"} aria-label={resource.table === "businesses" ? "View business owner details" : "View user details"}><Eye /></button> : null}{providersSection ? <button onClick={() => setProviderProfile(row)} title="View Admin details" aria-label="View Admin details"><Eye /></button> : null}{!bookingsSection ? <>{row._is_post ? null : <button onClick={() => placesSection ? setPlaceEditor({ row }) : setEditing(row)} title="Edit" aria-label="Edit record"><Pencil /></button>}{placesSection ? <button onClick={() => setPlaceStatus(row, row.status === "PUBLISHED" ? "HIDDEN" : "PUBLISHED")} title={row.status === "PUBLISHED" ? "Hide from public pages" : "Publish on public pages"} aria-label={row.status === "PUBLISHED" ? "Hide place" : "Publish place"}>{row.status === "PUBLISHED" ? <EyeOff /> : <Eye />}</button> : resource.remove ? <button onClick={() => remove(row)} disabled={self} title={self ? "You cannot suspend yourself" : "Remove from active use"} aria-label="Remove record"><Archive /></button> : null}{resource.activation ? <button className="danger ops-block-button" onClick={() => blockAccount(row)} disabled={self || (row._is_post && !canManageProfile(user.id, row.author_id || row.reported_post_owner_id))} title={self || (row._is_post && !canManageProfile(user.id, row.author_id || row.reported_post_owner_id)) ? "You cannot block yourself" : "Block account"} aria-label="Block record"><ShieldAlert /></button> : null}{resource.activation || row._is_post ? null : <button className="danger" onClick={() => resource.noDelete ? setError(resource.deleteReason) : setDeleting(row)} title={resource.noDelete ? resource.deleteReason : "Delete permanently"} aria-label="Delete record"><Trash2 /></button>}</> : null}</>}</div></td></tr>; })}</tbody></table></div><p className="ops-table-foot">Showing {visibleRows.length} of {rows.length} loaded records</p></section> : null}
+        {resource && section !== "media" ? <section className="ops-table-panel">{resource.businessSection && !resource.subscriptionSection && !resource.activation ? <div className="ops-provider-tabs ops-business-tabs" role="tablist" aria-label="Business management"><button role="tab" aria-selected={section === "businesses"} className={section === "businesses" ? "active" : ""} onClick={() => setSection("businesses")}><BriefcaseBusiness />Business accounts</button>{BUSINESS_RESOURCES.map((item) => { const Icon = item.icon; return <button role="tab" aria-selected={section === item.id} className={section === item.id ? "active" : ""} onClick={() => setSection(item.id)} key={item.id}><Icon />{item.label}</button>; })}</div> : null}{resource.table === "providers" && !resource.activation ? <div className="ops-provider-tabs" role="tablist" aria-label="Provider categories"><button role="tab" aria-selected={section === "providers"} className={section === "providers" ? "active" : ""} onClick={() => setSection("providers")}><Building2 />All providers</button>{PROVIDER_RESOURCES.map((item) => { const Icon = item.icon; return <button role="tab" aria-selected={section === item.id} className={section === item.id ? "active" : ""} onClick={() => setSection(item.id)} key={item.id}><Icon />{item.label}</button>; })}</div> : null}{(resource.subscriptionSection || section === "frozen-subscriptions") ? <div className="ops-subscription-tabs" role="tablist" aria-label="Subscription account types"><button role="tab" aria-selected={section === "subscriptions"} className={section === "subscriptions" ? "active" : ""} onClick={() => setSection("subscriptions")}><ClipboardCheck />Provider subscriptions</button><button role="tab" aria-selected={section === "business-subscriptions"} className={section === "business-subscriptions" ? "active" : ""} onClick={() => setSection("business-subscriptions")}><BriefcaseBusiness />Business accounts</button>{canOpenSection("frozen-subscriptions") ? <button role="tab" aria-selected={section === "frozen-subscriptions"} className={section === "frozen-subscriptions" ? "active" : ""} onClick={() => setSection("frozen-subscriptions")}><BadgeCheck />Activate subscriptions</button> : null}</div> : null}<div className="ops-table-tools"><div className="ops-table-filters"><label><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${resource.label.toLowerCase()}`} /></label>{resource.id === "places" ? <select aria-label="Filter by division" value={divisionFilter} onChange={(event) => { setDivisionFilter(event.target.value); setDistrictFilter(""); }}><option value="">All divisions</option>{divisionOptions.map((division) => <option value={division} key={division}>{division}</option>)}</select> : null}{resource.id === "places" ? <select aria-label="Filter by district" value={districtFilter} onChange={(event) => setDistrictFilter(event.target.value)}><option value="">All districts</option>{filteredDistrictOptions.map((district) => <option value={district.id} key={district.id}>{district.name}</option>)}</select> : null}{resource.id === "reports" ? <select aria-label="Filter by report status" value={reportStatusFilter} onChange={(event) => setReportStatusFilter(event.target.value)}><option value="OPEN">Open reports</option><option value="RESOLVED">Resolved reports</option><option value="ALL">All reports</option></select> : null}</div><div className="ops-table-actions">{resource.id === "places" ? <button className="ops-button" onClick={() => setPlaceEditor({ row: null })}><Plus /> Add place</button> : null}<button className="ops-icon-button" onClick={() => loadRows(resource)} title="Refresh" aria-label="Refresh records"><RefreshCw /></button></div></div>{bypassAuth && resource.table === "providers" ? <div className="ops-data-note"><ShieldCheck /><span>Protected provider accounts load through the localhost Admin server. The Supabase service-role key stays outside the browser.</span></div> : null}{error ? <div className="ops-alert" role="alert"><AlertTriangle /><span>{error}</span><button onClick={() => setError("")} aria-label="Dismiss error"><X /></button></div> : null}<div className="ops-table-wrap"><table><thead><tr>{resource.columns.map((column) => <th key={column}>{column.replaceAll("_", " ")}</th>)}<th>Actions</th></tr></thead><tbody>{loading ? <tr><td colSpan={resource.columns.length + 1} className="ops-empty">Loading records...</td></tr> : null}{!loading && !visibleRows.length ? <tr><td colSpan={resource.columns.length + 1} className="ops-empty">{resource.table === "providers" ? "No provider accounts are available to this session." : "No records found."}</td></tr> : null}{visibleRows.map((row) => { const self = resource.id === "profiles" && !canManageProfile(user.id, row.id); const placesSection = resource.id === "places"; const profilesSection = resource.table === "profiles" || resource.table === "businesses"; const providersSection = resource.table === "providers"; const providerSubscriptionSection = resource.table === "provider_subscriptions"; const bookingsSection = resource.id === "bookings"; const reportsSection = resource.id === "reports"; return <tr key={row._row_key || row[resource.primaryKey || "id"]}>{resource.columns.map((column) => <td key={column} title={show(row[column])}>{show(row[column])}</td>)}<td><div className="ops-row-actions">{resource.readonly ? <span className="ops-readonly"><ShieldCheck /> Read only</span> : row._publicPreview ? <><PublicProfileLink provider={row} /><button onClick={() => setProviderProfile(row)} title="View Admin details" aria-label="View Admin details"><Eye /></button></> : <>{bookingsSection && row.provider_record ? <><PublicProfileLink provider={row.provider_record} /><button onClick={() => setProviderProfile(row.provider_record)} title="View provider details" aria-label="View provider details"><Eye /></button><button onClick={() => setBookingHistory(row)} title="View booking history" aria-label="View booking history"><BookOpenCheck /></button></> : null}{reportsSection ? <button onClick={() => setReportDetails(row)} title="View report details" aria-label="View report details"><Eye /></button> : null}{providersSection || profilesSection ? <PublicProfileLink provider={row._is_post ? { user_id: row.author_id } : row} /> : null}{providerSubscriptionSection && row.provider_record ? <><PublicProfileLink provider={row.provider_record} /><button onClick={() => setProviderProfile(row.provider_record)} title="View Admin details" aria-label="View Admin details"><Eye /></button></> : null}{row._is_post ? <button onClick={() => setReportDetails(row)} title="View post and report details" aria-label="View post and report details"><Eye /></button> : profilesSection ? <button onClick={() => setTravelerProfile(row.profile || row)} title={resource.table === "businesses" ? "View business owner details" : "View user details"} aria-label={resource.table === "businesses" ? "View business owner details" : "View user details"}><Eye /></button> : null}{providersSection ? <button onClick={() => setProviderProfile(row)} title="View Admin details" aria-label="View Admin details"><Eye /></button> : null}{!bookingsSection ? <>{row._is_post ? null : <button onClick={() => placesSection ? setPlaceEditor({ row }) : setEditing(row)} title="Edit" aria-label="Edit record"><Pencil /></button>}{placesSection ? <button onClick={() => setPlaceStatus(row, row.status === "PUBLISHED" ? "HIDDEN" : "PUBLISHED")} title={row.status === "PUBLISHED" ? "Hide from public pages" : "Publish on public pages"} aria-label={row.status === "PUBLISHED" ? "Hide place" : "Publish place"}>{row.status === "PUBLISHED" ? <EyeOff /> : <Eye />}</button> : resource.remove ? <button onClick={() => remove(row)} disabled={self} title={self ? "You cannot suspend yourself" : "Remove from active use"} aria-label="Remove record"><Archive /></button> : null}{resource.activation ? <button className="danger ops-block-button" onClick={() => blockAccount(row)} disabled={self || (row._is_post && !canManageProfile(user.id, row.author_id || row.reported_post_owner_id))} title={self || (row._is_post && !canManageProfile(user.id, row.author_id || row.reported_post_owner_id)) ? "You cannot block yourself" : "Block account"} aria-label="Block record"><ShieldAlert /></button> : null}{resource.activation || row._is_post ? null : <button className="danger" onClick={() => resource.noDelete ? setError(resource.deleteReason) : setDeleting(row)} title={resource.noDelete ? resource.deleteReason : "Delete permanently"} aria-label="Delete record"><Trash2 /></button>}</> : null}</>}</div></td></tr>; })}</tbody></table></div><p className="ops-table-foot">Showing {visibleRows.length} of {rows.length} loaded records</p></section> : null}
       </main>
       {editing ? <Editor resource={resource} row={editing} userId={user.id} bypassAuth={bypassAuth} onClose={() => setEditing(null)} onSaved={saved} /> : null}
       {placeEditor ? <PlaceEditor row={placeEditor.row} districts={districtOptions} bypassAuth={bypassAuth} onClose={() => setPlaceEditor(null)} onSaved={saved} /> : null}

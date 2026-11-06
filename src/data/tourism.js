@@ -87,15 +87,225 @@ export const districts = [
   { id: "sherpur", name: "Sherpur", division: "Mymensingh", slug: "sherpur", status: "published" },
 ];
 
+export let placesVersion = 0;
+
+export const CUSTOM_MEDIA_STORE = {
+  places: {},
+  galleries: {},
+  banners: {},
+  water: {},
+};
+
+if (typeof window !== "undefined" && window.localStorage) {
+  try {
+    const rawPlaces = window.localStorage.getItem("tourismubd_custom_place_images");
+    if (rawPlaces) CUSTOM_MEDIA_STORE.places = { ...CUSTOM_MEDIA_STORE.places, ...JSON.parse(rawPlaces) };
+    const rawBanners = window.localStorage.getItem("tourismubd_custom_banners");
+    if (rawBanners) CUSTOM_MEDIA_STORE.banners = { ...CUSTOM_MEDIA_STORE.banners, ...JSON.parse(rawBanners) };
+    const rawWater = window.localStorage.getItem("tourismubd_custom_water_images");
+    if (rawWater) CUSTOM_MEDIA_STORE.water = { ...CUSTOM_MEDIA_STORE.water, ...JSON.parse(rawWater) };
+    const rawGalleries = window.localStorage.getItem("tourismubd_custom_galleries");
+    if (rawGalleries) CUSTOM_MEDIA_STORE.galleries = { ...CUSTOM_MEDIA_STORE.galleries, ...JSON.parse(rawGalleries) };
+  } catch {}
+}
+
+let mediaChannel = null;
+if (typeof window !== "undefined" && "BroadcastChannel" in window) {
+  try {
+    mediaChannel = new BroadcastChannel("tourismubd_media_channel");
+    mediaChannel.onmessage = (event) => {
+      const { type, key, value, all } = event.data || {};
+      if (all) {
+        if (all.places) Object.assign(CUSTOM_MEDIA_STORE.places, all.places);
+        if (all.galleries) Object.assign(CUSTOM_MEDIA_STORE.galleries, all.galleries);
+        if (all.banners) Object.assign(CUSTOM_MEDIA_STORE.banners, all.banners);
+        if (all.water) Object.assign(CUSTOM_MEDIA_STORE.water, all.water);
+      } else if (type && key && value !== undefined) {
+        if (!CUSTOM_MEDIA_STORE[type]) CUSTOM_MEDIA_STORE[type] = {};
+        CUSTOM_MEDIA_STORE[type][key] = value;
+      }
+      placesVersion += 1;
+      window.dispatchEvent(new CustomEvent("tourismubd-media-updated", { detail: event.data }));
+      if (type === "banners") {
+        window.dispatchEvent(new CustomEvent("tourismubd-banner-updated", { detail: { id: key, imageUrl: value } }));
+      }
+    };
+  } catch {}
+}
+
+export async function syncCustomMediaFromServer() {
+  if (typeof window === "undefined" || !window.fetch) return;
+  try {
+    const res = await fetch("/data/custom-media.json?t=" + Date.now());
+    if (res.ok) {
+      const json = await res.json();
+      if (json && typeof json === "object") {
+        let changed = false;
+        if (json.places && Object.keys(json.places).length) {
+          Object.assign(CUSTOM_MEDIA_STORE.places, json.places);
+          changed = true;
+        }
+        if (json.galleries && Object.keys(json.galleries).length) {
+          Object.assign(CUSTOM_MEDIA_STORE.galleries, json.galleries);
+          changed = true;
+        }
+        if (json.banners && Object.keys(json.banners).length) {
+          Object.assign(CUSTOM_MEDIA_STORE.banners, json.banners);
+          changed = true;
+        }
+        if (json.water && Object.keys(json.water).length) {
+          Object.assign(CUSTOM_MEDIA_STORE.water, json.water);
+          changed = true;
+        }
+        if (changed) {
+          placesVersion += 1;
+          window.dispatchEvent(new CustomEvent("tourismubd-media-updated", { detail: json }));
+        }
+      }
+    }
+  } catch {}
+}
+
+if (typeof window !== "undefined") {
+  syncCustomMediaFromServer();
+}
+
+export function broadcastAndPersistMedia(type, key, value) {
+  if (!CUSTOM_MEDIA_STORE[type]) CUSTOM_MEDIA_STORE[type] = {};
+  CUSTOM_MEDIA_STORE[type][key] = value;
+  placesVersion += 1;
+
+  if (typeof window === "undefined") return;
+
+  if (mediaChannel) {
+    try {
+      mediaChannel.postMessage({ type, key, value });
+    } catch {}
+  }
+
+  window.dispatchEvent(new CustomEvent("tourismubd-media-updated", { detail: { type, key, value } }));
+
+  const endpoints = ["/__tourismubd-admin/media-sync", "/__tourismubd-media-sync"];
+  endpoints.forEach((ep) => {
+    fetch(ep, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type, key, value }),
+    }).catch(() => {});
+  });
+}
+
+export function getCustomPlaceImage(placeSlugOrId) {
+  if (!placeSlugOrId) return null;
+  if (CUSTOM_MEDIA_STORE.places[placeSlugOrId]) {
+    return CUSTOM_MEDIA_STORE.places[placeSlugOrId];
+  }
+  try {
+    if (typeof window !== "undefined" && window.localStorage) {
+      const raw = window.localStorage.getItem("tourismubd_custom_place_images");
+      if (raw) {
+        const custom = JSON.parse(raw);
+        if (custom[placeSlugOrId]) {
+          CUSTOM_MEDIA_STORE.places[placeSlugOrId] = custom[placeSlugOrId];
+          return custom[placeSlugOrId];
+        }
+      }
+    }
+  } catch {}
+  return null;
+}
+
+export function saveCustomPlaceImage(placeSlugOrId, imageUrl) {
+  if (!placeSlugOrId || !imageUrl) return;
+  try {
+    if (typeof window !== "undefined" && window.localStorage) {
+      const raw = window.localStorage.getItem("tourismubd_custom_place_images");
+      const custom = raw ? JSON.parse(raw) : {};
+      custom[placeSlugOrId] = imageUrl;
+      window.localStorage.setItem("tourismubd_custom_place_images", JSON.stringify(custom));
+    }
+  } catch (err) {
+    console.error("Failed to save custom place image:", err);
+  }
+  broadcastAndPersistMedia("places", placeSlugOrId, imageUrl);
+}
+
+export function getSystemBanner(id, fallback = FALLBACK_IMAGE) {
+  if (!id) return fallback;
+  if (CUSTOM_MEDIA_STORE.banners[id]) {
+    return CUSTOM_MEDIA_STORE.banners[id];
+  }
+  try {
+    if (typeof window !== "undefined" && window.localStorage) {
+      const raw = window.localStorage.getItem("tourismubd_custom_banners");
+      if (raw) {
+        const custom = JSON.parse(raw);
+        if (custom[id]) {
+          CUSTOM_MEDIA_STORE.banners[id] = custom[id];
+          return custom[id];
+        }
+      }
+    }
+  } catch {}
+  return fallback;
+}
+
+export function saveCustomSystemBanner(id, imageUrl) {
+  if (!id || !imageUrl) return;
+  try {
+    if (typeof window !== "undefined" && window.localStorage) {
+      const raw = window.localStorage.getItem("tourismubd_custom_banners");
+      const custom = raw ? JSON.parse(raw) : {};
+      custom[id] = imageUrl;
+      window.localStorage.setItem("tourismubd_custom_banners", JSON.stringify(custom));
+      window.dispatchEvent(new CustomEvent("tourismubd-banner-updated", { detail: { id, imageUrl } }));
+    }
+  } catch (err) {
+    console.error("Failed to save system banner:", err);
+  }
+  broadcastAndPersistMedia("banners", id, imageUrl);
+}
+
+export function getCustomWaterImage(id, fallback = "/images/gallery/water-1.jpg") {
+  if (!id) return fallback;
+  if (CUSTOM_MEDIA_STORE.water[id]) return CUSTOM_MEDIA_STORE.water[id];
+  try {
+    if (typeof window !== "undefined" && window.localStorage) {
+      const raw = window.localStorage.getItem("tourismubd_custom_water_images");
+      if (raw) {
+        const custom = JSON.parse(raw);
+        if (custom[id]) {
+          CUSTOM_MEDIA_STORE.water[id] = custom[id];
+          return custom[id];
+        }
+      }
+    }
+  } catch {}
+  return fallback;
+}
+
+export function saveCustomWaterImage(id, imageUrl) {
+  if (!id || !imageUrl) return;
+  try {
+    if (typeof window !== "undefined" && window.localStorage) {
+      const raw = window.localStorage.getItem("tourismubd_custom_water_images");
+      const custom = raw ? JSON.parse(raw) : {};
+      custom[id] = imageUrl;
+      window.localStorage.setItem("tourismubd_custom_water_images", JSON.stringify(custom));
+    }
+  } catch {}
+  broadcastAndPersistMedia("water", id, imageUrl);
+}
+
 const place = (data) => {
   const districtKey = `${data.districtId || "sylhet"}:${data.slug}`;
   const accessDetails = kishoreganjPlaceDetails(data.districtId, data.slug);
   const verifiedCoordinates = accessDetails?.coordinates || KHULNA_PLACE_COORDINATES[districtKey] || BARISHAL_PLACE_COORDINATES[districtKey] || RAJSHAHI_PLACE_COORDINATES[districtKey] || VERIFIED_PLACE_COORDINATES[data.slug];
-  return {
+  const item = {
     districtId: "sylhet",
     district: "Sylhet",
     status: "published",
-    image: FALLBACK_IMAGE,
+    image: data.image || FALLBACK_IMAGE,
     ...data,
     id: KHULNA_PLACE_IDS[districtKey] || BARISHAL_PLACE_IDS[districtKey] || districtPlaceId(data.districtId || "sylhet", data.slug),
     practicalTip: accessDetails?.practicalTip || KHULNA_PLACE_NOTES[districtKey] || BARISHAL_PLACE_NOTES[districtKey] || RAJSHAHI_PLACE_NOTES[districtKey] || data.practicalTip,
@@ -106,6 +316,19 @@ const place = (data) => {
     roadRoutingProfile: "shortest-astar",
     coordinatesAreApproximate: verifiedCoordinates ? false : (data.coordinatesAreApproximate ?? true),
   };
+  let defaultImage = item.image;
+  Object.defineProperty(item, "image", {
+    get() {
+      const custom = getCustomPlaceImage(data.slug) || getCustomPlaceImage(item.id);
+      return custom || defaultImage;
+    },
+    set(val) {
+      defaultImage = val;
+    },
+    configurable: true,
+    enumerable: true,
+  });
+  return item;
 };
 
 const mymensinghDivisionPlaces = [
@@ -757,6 +980,7 @@ export const suggestedPlacesForDistrict = (districtId) => places.filter((place) 
 export function replacePublishedTourismData(nextDistricts, nextPlaces) {
   districts.splice(0, districts.length, ...nextDistricts);
   places.splice(0, places.length, ...nextPlaces);
+  placesVersion += 1;
 }
 
 // Real marketplace inventory is intentionally empty until providers are verified.
