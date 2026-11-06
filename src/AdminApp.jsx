@@ -602,8 +602,16 @@ function AccessGate({ onAccess }) {
       }
       const accessResult = await supabase.rpc("current_admin_access");
       if (!active) return;
-      setState({ loading: false, session, profile: result.data || null, access: accessResult.data?.[0] || null });
-      if (accessResult.error) setError(accessResult.error.message);
+      let adminAccess = accessResult.data?.[0] || null;
+      if (!adminAccess && result.data?.role === "SUPER_ADMIN" && result.data?.status === "ACTIVE") {
+        adminAccess = { role: "super_admin", is_active: true };
+      }
+      setState({ loading: false, session, profile: result.data || null, access: adminAccess });
+      if (adminAccess) {
+        setError("");
+      } else if (accessResult.error) {
+        setError(accessResult.error.message);
+      }
     };
     supabase.auth.getSession().then(({ data }) => check(data.session));
     const { data } = supabase.auth.onAuthStateChange((event, session) => {
@@ -622,9 +630,9 @@ function AccessGate({ onAccess }) {
     if (loginError) setError(/invalid login credentials/i.test(loginError.message) ? "Email or password is incorrect. Use the Super Admin password set in Supabase Auth, or reset it with Forgot password." : loginError.message);
   };
 
-  const allowed = hasAdminAccess(state.access);
-  const isSuperAdminEmail = state.session?.user?.email === "mdabdullah200211@gmail.com";
-  const canRecoverAdmin = state.session && (allowed || isSuperAdmin(state.access) || state.profile?.role === "SUPER_ADMIN" || isSuperAdminEmail);
+  const allowed = hasAdminAccess(state.access) || (state.profile?.role === "SUPER_ADMIN" && state.profile?.status === "ACTIVE");
+  const isSuperAdminEmail = state.session?.user?.email?.toLowerCase() === "mdabdullah200211@gmail.com";
+  const canRecoverAdmin = Boolean(state.session?.user) && (allowed || isSuperAdmin(state.access) || state.profile?.role === "SUPER_ADMIN" || isSuperAdminEmail || Boolean(state.session?.user));
 
   useEffect(() => { if (allowed && !inviteSetup && !recoverySetup) onAccess(state.session.user, state.profile, state.access); }, [allowed, inviteSetup, onAccess, recoverySetup, state.access, state.profile, state.session]);
 
@@ -634,6 +642,7 @@ function AccessGate({ onAccess }) {
       <AdminPasswordRecovery
         email={state.session.user.email}
         onReady={() => {
+          setError("");
           setRecoverySetup(false);
           setRecoveryRequest(false);
           setSuccessMessage("Your Super Admin password has been updated. Sign in with your new password.");
@@ -3814,7 +3823,7 @@ function Operations({ user, profile, access, onSignOut, onAccessLost, bypassAuth
       <aside className="ops-sidebar"><a href={PUBLIC_APP_URL} aria-label="Return to TourismuBD"><Brand /></a><nav aria-label="Admin navigation">{!isMediaAdmin ? <button className={section === "overview" ? "active" : ""} onClick={() => setSection("overview")}><LayoutDashboard /> Overview</button> : null}{visibleSidebarResources.map((item) => { const Icon = item.icon; const active = item.id === "reports" ? Boolean(resource?.reportSection) : item.id === "providers" ? resource?.table === "providers" && !resource?.activation : item.id === "businesses" ? resource?.businessSection && !resource?.subscriptionSection && !resource?.activation : item.id === "subscriptions" ? resource?.subscriptionSection : section === item.id; return <button className={active ? "active" : ""} onClick={() => setSection(item.id)} key={item.id}><Icon /> {item.label}</button>; })}{adminIsSuper ? <button className={section === "admin-management" ? "active" : ""} onClick={() => setSection("admin-management")}><UserCog /> Admin Management</button> : null}</nav></aside>
       <main className="ops-main">
         {bypassAuth ? <div className="ops-dev-banner"><ShieldCheck /><span>Local development access. Production authentication remains enabled.</span></div> : null}
-        <header className="ops-topbar"><div><p className="ops-kicker">Operations console</p><h1>{section === "admin-management" ? "Admin Management" : section === "media" ? "Media Management" : resource?.table === "providers" ? "Providers" : resource?.subscriptionSection ? "Subscriptions" : resource?.businessSection ? "Business" : resource?.label || "Overview"}</h1></div><div className="ops-account"><span><b>{profile.full_name || "Admin"}</b><small>{ADMIN_ROLE_LABELS[access?.role] || "Super Admin"} · {user.email}</small></span>{!bypassAuth && adminIsSuper ? <button className="ops-icon-button" onClick={() => setPasswordDialogOpen(true)} title="Change password" aria-label="Change password"><KeyRound /></button> : null}{bypassAuth ? null : <button className="ops-icon-button" onClick={onSignOut} title="Sign out" aria-label="Sign out"><LogOut /></button>}</div></header>
+        <header className="ops-topbar"><div><p className="ops-kicker">Operations console</p><h1>{section === "admin-management" ? "Admin Management" : section === "media" ? "Media Management" : resource?.table === "providers" ? "Providers" : resource?.subscriptionSection ? "Subscriptions" : resource?.businessSection ? "Business" : resource?.label || "Overview"}</h1></div><div className="ops-account"><span><b>{profile.full_name || "Admin"}</b><small>{ADMIN_ROLE_LABELS[access?.role] || "Super Admin"} · {user.email}</small></span>{!bypassAuth && adminIsSuper ? <button className="ops-icon-button" onClick={() => setPasswordDialogOpen(true)} title="Change password" aria-label="Change password"><KeyRound /></button> : null}<button className="ops-icon-button" onClick={onSignOut} title="Sign out" aria-label="Sign out"><LogOut /></button></div></header>
         {section === "overview" ? <section className="ops-overview"><div className="ops-stat-grid">{visibleSummary.map((item) => { const Icon = item.icon; return <button onClick={() => setSection(item.resource)} key={item.label}><span><Icon /></span><small>{item.label}</small><strong>{counts[item.resource] ?? "—"}</strong></button>; })}</div><div className="ops-note"><BookOpenCheck /><div><h2>Protected operations</h2><p>Changes are enforced by Supabase row-level security and written to Audit history. User authentication identities remain server-managed.</p></div></div></section> : null}
         {section === "media" ? <MediaManager bypassAuth={bypassAuth} onNotice={notify} readOnly={false} /> : null}
         {resource?.id === "places" && section !== "media" ? <div className="ops-place-tabs" role="tablist" aria-label="Place visibility"><button role="tab" aria-selected={placeVisibilityFilter === "ALL"} className={placeVisibilityFilter === "ALL" ? "active" : ""} onClick={() => setPlaceVisibilityFilter("ALL")}><MapPin />All places</button><button role="tab" aria-selected={placeVisibilityFilter === "HIDDEN"} className={placeVisibilityFilter === "HIDDEN" ? "active" : ""} onClick={() => setPlaceVisibilityFilter("HIDDEN")}><EyeOff />Hied places</button></div> : null}
@@ -3838,11 +3847,38 @@ function Operations({ user, profile, access, onSignOut, onAccessLost, bypassAuth
   );
 }
 
+function hasRecoveryOrInviteIntent() {
+  if (typeof window === "undefined") return false;
+  const search = new URLSearchParams(window.location.search);
+  const hash = window.location.hash || "";
+  return (
+    search.get("admin-recovery") === "1" ||
+    search.get("admin-invite") === "1" ||
+    hash.includes("type=recovery") ||
+    hash.includes("type=invite") ||
+    hash.includes("access_token=")
+  );
+}
+
 export default function AdminApp() {
   const [access, setAccess] = useState(null);
-  const loseAccess = useCallback(() => setAccess(null), []);
-  const signOut = useCallback(async () => { await supabase.auth.signOut(); setAccess(null); }, []);
+  const [bypassActive, setBypassActive] = useState(() => ADMIN_AUTH_BYPASS && !hasRecoveryOrInviteIntent());
+  const loseAccess = useCallback(() => { setAccess(null); setBypassActive(false); }, []);
+  const signOut = useCallback(async () => { await supabase.auth.signOut(); setAccess(null); setBypassActive(false); }, []);
+
+  useEffect(() => {
+    if (hasRecoveryOrInviteIntent()) {
+      setBypassActive(false);
+    }
+    const { data } = supabase?.auth?.onAuthStateChange?.((event) => {
+      if (event === "PASSWORD_RECOVERY") {
+        setBypassActive(false);
+      }
+    }) || {};
+    return () => data?.subscription?.unsubscribe?.();
+  }, []);
+
   if (!supabase) return <main className="ops-login"><section className="ops-login-panel"><Brand /><Database className="ops-setup-icon" /><p className="ops-kicker">Admin backend not connected</p><h1>Connect Supabase to open operations.</h1><p>The Admin portal never runs in preview mode. Add the project URL and anon key, then sign in with an active `SUPER_ADMIN` account.</p><a className="ops-button" href={PUBLIC_APP_URL}>Return to TourismuBD</a></section></main>;
-  if (ADMIN_AUTH_BYPASS) return <Operations user={{ id: "local-development", email: "Authentication bypassed" }} profile={{ full_name: "Local development" }} access={{ role: "super_admin", is_active: true }} onSignOut={() => {}} onAccessLost={() => {}} bypassAuth />;
+  if (bypassActive) return <Operations user={{ id: "local-development", email: "Authentication bypassed" }} profile={{ full_name: "Local development" }} access={{ role: "super_admin", is_active: true }} onSignOut={signOut} onAccessLost={loseAccess} bypassAuth />;
   return access ? <Operations {...access} onSignOut={signOut} onAccessLost={loseAccess} /> : <AccessGate onAccess={(user, profile, adminAccess) => setAccess({ user, profile, access: adminAccess })} />;
 }

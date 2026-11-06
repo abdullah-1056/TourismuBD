@@ -1,0 +1,35 @@
+name: Supabase Keep-Alive
+
+on:
+  schedule:
+    # Runs every 3 days at 04:00 UTC (well within Supabase's 7-day free inactivity pause limit)
+    - cron: '0 4 */3 * *'
+  workflow_dispatch: # Allows manual trigger from GitHub Actions tab
+
+jobs:
+  ping-supabase:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase to keep free tier active
+        env:
+          SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || 'https://meioprmcsgtubmumdlri.supabase.co' }}
+          SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1laW9wcm1jc2d0dWJtdW1kbHJpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxODIxOTUsImV4cCI6MjEwMjc1ODE5NX0.CqeehdY-mRPhgfO4sCBOwJmgeYidxDdDV4txKV3uPIM' }}
+        run: |
+          echo "Sending keep-alive query to Supabase database..."
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -H "apikey: $SUPABASE_ANON_KEY" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+            "$SUPABASE_URL/rest/v1/places?select=id&limit=1")
+          
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | head -n -1)
+          
+          echo "Supabase HTTP status: $HTTP_CODE"
+          if [ "$HTTP_CODE" -eq 200 ]; then
+            echo "Keep-alive query succeeded! Database response: $BODY"
+            echo "Supabase 7-day inactivity timer has been successfully reset."
+          else
+            echo "Warning: Received HTTP $HTTP_CODE. Body: $BODY"
+            exit 1
+          fi
+
