@@ -62,12 +62,12 @@ import { getPlaceGallery, saveCustomPlaceGallery } from "./data/place-galleries.
 
 const RESOURCES = [
   { id: "media", label: "Media", table: "places", adminModule: "media", mediaSection: true, icon: ImageIcon, columns: ["name", "category", "district_id", "image_url"] },
-  { id: "profiles", label: "Users", table: "profiles", adminModule: "users", profileRole: "TRAVELER", publicProfilesOnly: true, icon: UsersRound, columns: ["full_name", "email", "phone", "district", "role", "status", "updated_at"], remove: { status: "SUSPENDED" }, noDelete: true, deleteReason: "Auth users require server-side deletion." },
+  { id: "profiles", label: "Users", table: "profiles", adminModule: "users", profileRole: "TRAVELER", publicProfilesOnly: true, icon: UsersRound, columns: ["full_name", "email", "phone", "district", "role", "status", "updated_at"], remove: { status: "SUSPENDED" } },
   { id: "providers", label: "Providers", table: "providers", adminModule: "providers", icon: Building2, columns: ["owner_name", "provider_type", "district", "contact_email", "account_status", "public_status"], remove: { account_status: "REMOVED", public_status: "HIDDEN" } },
-  { id: "businesses", label: "Business", table: "businesses", adminModule: "business", businessSection: true, icon: BriefcaseBusiness, columns: ["owner_name", "business_name", "district", "contact_email", "contact_phone", "account_status", "public_status"], remove: { account_status: "REMOVED", public_status: "HIDDEN" }, noDelete: true, deleteReason: "Business accounts are linked to Auth users. Hide or remove them from active use instead." },
+  { id: "businesses", label: "Business", table: "businesses", adminModule: "business", businessSection: true, icon: BriefcaseBusiness, columns: ["owner_name", "business_name", "district", "contact_email", "contact_phone", "account_status", "public_status"], remove: { account_status: "REMOVED", public_status: "HIDDEN" } },
   { id: "business-products", label: "Products", table: "business_products", adminModule: "business", businessSection: true, businessChild: true, icon: Package, columns: ["seller_name", "name", "description", "price_bdt", "stock_quantity", "status", "updated_at"], remove: { status: "HIDDEN" } },
   { id: "subscriptions", label: "Subscriptions", table: "provider_subscriptions", adminModule: "subscriptions", subscriptionSection: true, icon: ClipboardCheck, columns: ["owner_name", "service_name", "provider_type", "district", "monthly_fee_bdt", "status", "current_period_end"], remove: { status: "FROZEN" } },
-  { id: "business-subscriptions", label: "Business accounts", table: "businesses", businessSection: true, subscriptionSection: true, subscriptionChild: true, icon: BriefcaseBusiness, columns: ["owner_name", "business_name", "district", "account_status", "public_status"], remove: { account_status: "REMOVED", public_status: "HIDDEN" }, noDelete: true, deleteReason: "Business accounts are linked to Auth users. Hide or remove them from active use instead." },
+  { id: "business-subscriptions", label: "Business accounts", table: "businesses", businessSection: true, subscriptionSection: true, subscriptionChild: true, icon: BriefcaseBusiness, columns: ["owner_name", "business_name", "district", "account_status", "public_status"], remove: { account_status: "REMOVED", public_status: "HIDDEN" } },
   { id: "places", label: "Places", table: "places", icon: MapPin, columns: ["division_name", "district_name", "name", "upazila_or_area", "category", "status"], remove: { status: "HIDDEN" } },
   { id: "routes", label: "Routes", table: "place_relationships", icon: Route, columns: ["from_place_id", "to_place_id", "relationship_type", "travel_minutes"] },
   { id: "water", label: "Water bodies", table: "water_bodies", icon: Waves, columns: ["name", "type", "is_sundarbans", "status"], remove: { status: "HIDDEN" } },
@@ -266,6 +266,14 @@ async function removeSecondaryAdmin(adminAccountId, bypassAuth) {
   if (import.meta.env.DEV) return callLocalAdminRpc("remove_secondary_admin", { admin_account_id: adminAccountId }, { requireSuperAdmin: !bypassAuth });
   const { data, error } = await supabase.functions.invoke("invite-secondary-admin", { body: { action: "remove", adminAccountId } });
   if (error) throw new Error(data?.error || error.message || "Could not remove the Secondary Admin.");
+  if (data?.error) throw new Error(data.error);
+  return data;
+}
+
+async function deleteAuthUser(userId, bypassAuth) {
+  if (import.meta.env.DEV) return callLocalAdminRpc("delete_user", { user_id: userId }, { requireSuperAdmin: !bypassAuth });
+  const { data, error } = await supabase.functions.invoke("invite-secondary-admin", { body: { action: "delete_user", userId } });
+  if (error) throw new Error(data?.error || error.message || "Could not delete user account.");
   if (data?.error) throw new Error(data.error);
   return data;
 }
@@ -1027,14 +1035,15 @@ function DeleteRecordDialog({ resource, row, onClose, onConfirm }) {
   const dialogRef = useRef(null);
   const recordName = row._is_post
     ? (row.reported_post ? (row.reported_post.length > 50 ? `${row.reported_post.slice(0, 47)}...` : row.reported_post) : row.id)
-    : (row.name || row.display_name || row.full_name || row.business_name || row.id);
+    : (row.name || row.display_name || row.full_name || row.business_name || row.contact_email || row.email || row.id);
+  const isAuthAccount = ["profiles", "providers", "businesses"].includes(resource.table);
   useEffect(() => { dialogRef.current?.showModal(); }, []);
   return <dialog ref={dialogRef} className="ops-dialog" onCancel={onClose}>
     <section className="ops-editor">
       <button type="button" className="ops-icon-button ops-close" onClick={onClose} aria-label="Close delete confirmation"><X /></button>
       <p className="ops-kicker">Permanent action</p>
       <h2>Delete record?</h2>
-      <p>Delete <b>{recordName}</b> from {resource.label.toLowerCase()}? This cannot be undone.</p>
+      <p>Delete <b>{recordName}</b> from {resource.label.toLowerCase()}? {isAuthAccount ? "This permanently deletes this account and its Supabase Auth identity from the system." : "This cannot be undone."}</p>
       <div className="ops-dialog-actions"><button type="button" className="ops-button secondary" onClick={onClose}>Cancel</button><button type="button" className="ops-button danger" onClick={() => onConfirm(row)}><Trash2 />Delete permanently</button></div>
     </section>
   </dialog>;
@@ -3765,6 +3774,29 @@ function Operations({ user, profile, access, onSignOut, onAccessLost, bypassAuth
       return;
     }
     if (resource.noDelete) return setError(resource.deleteReason);
+
+    // Deleting any user, provider, or business account permanently deletes
+    // their identity and data from Supabase Auth and all cascaded tables.
+    if (["profiles", "providers", "businesses"].includes(resource.table)) {
+      const targetUserId = resource.table === "profiles" ? row.id : row.user_id;
+      if (targetUserId) {
+        if (targetUserId === user.id || row.role === "SUPER_ADMIN" || row.email?.toLowerCase() === "mdabdullah200211@gmail.com" || row.contact_email?.toLowerCase() === "mdabdullah200211@gmail.com") {
+          setDeleting(null);
+          return setError("The Super Admin account cannot be deleted.");
+        }
+        try {
+          await deleteAuthUser(targetUserId, bypassAuth);
+          setDeleting(null);
+          notify("Account and Supabase Auth identity permanently deleted.");
+          await Promise.all([loadRows(), loadSummary()]);
+          return;
+        } catch (authDeleteError) {
+          setDeleting(null);
+          return setError(authDeleteError.message || "Failed to delete account from Supabase.");
+        }
+      }
+    }
+
     const key = resource.primaryKey || "id";
     let result;
     if (resource.id === "reports" && row.report_ids?.length) {

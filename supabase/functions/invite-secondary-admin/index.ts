@@ -74,20 +74,74 @@ Deno.serve(async (request) => {
     if (account.user_id) {
       const { data: profile, error: profileError } = await admin
         .from("profiles")
-        .select("is_admin_only")
+        .select("id,email,role,is_admin_only")
         .eq("id", account.user_id)
         .maybeSingle();
       if (profileError) return Response.json({ error: profileError.message }, { status: 502, headers });
-      if (profile?.is_admin_only) {
-        const { error: deleteError } = await admin.auth.admin.deleteUser(account.user_id);
-        if (deleteError) return Response.json({ error: deleteError.message }, { status: 502, headers });
-        return Response.json({ deleted: "auth_identity" }, { headers });
+      if (profile?.role === "SUPER_ADMIN" || profile?.email?.toLowerCase() === "mdabdullah200211@gmail.com") {
+        return Response.json({ error: "The Super Admin account cannot be deleted." }, { status: 403, headers });
       }
+
+      // Pre-clean child records that may have restrictive foreign keys
+      await admin.from("reports").delete().eq("created_by", account.user_id);
+      await admin.from("reviews").delete().eq("traveler_id", account.user_id);
+      await admin.from("bookings").delete().eq("traveler_id", account.user_id);
+      await admin.from("admin_accounts").delete().eq("id", adminAccountId);
+
+      const { error: deleteError } = await admin.auth.admin.deleteUser(account.user_id);
+      if (deleteError && deleteError.status !== 404) return Response.json({ error: deleteError.message }, { status: 502, headers });
+      return Response.json({ deleted: "auth_identity" }, { headers });
     }
 
     const { error: removeError } = await admin.rpc("remove_secondary_admin", { admin_account_id: adminAccountId });
     if (removeError) return Response.json({ error: removeError.message }, { status: 502, headers });
     return Response.json({ deleted: "admin_access" }, { headers });
+  }
+
+  if (action === "delete_user") {
+    const userId = typeof body.userId === "string" ? body.userId : "";
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(userId)) {
+      return Response.json({ error: "A valid user ID is required." }, { status: 400, headers });
+    }
+    const { data: profile } = await admin
+      .from("profiles")
+      .select("id,email,role")
+      .eq("id", userId)
+      .maybeSingle();
+    if (profile?.role === "SUPER_ADMIN" || profile?.email?.toLowerCase() === "mdabdullah200211@gmail.com") {
+      return Response.json({ error: "The Super Admin account cannot be deleted." }, { status: 403, headers });
+    }
+
+    // Pre-clean child records that may have restrictive foreign keys
+    await admin.from("reports").delete().eq("created_by", userId);
+    await admin.from("reviews").delete().eq("traveler_id", userId);
+    await admin.from("bookings").delete().eq("traveler_id", userId);
+
+    const { data: providerRows } = await admin.from("providers").select("id").eq("user_id", userId);
+    if (providerRows?.length) {
+      for (const prov of providerRows) {
+        await admin.from("bookings").delete().eq("provider_id", prov.id);
+      }
+    }
+
+    const { data: bizRows } = await admin.from("businesses").select("id").eq("user_id", userId);
+    if (bizRows?.length) {
+      for (const biz of bizRows) {
+        await admin.from("business_products").delete().eq("business_id", biz.id);
+      }
+    }
+
+    await admin.from("admin_accounts").delete().eq("user_id", userId);
+
+    const { error: deleteError } = await admin.auth.admin.deleteUser(userId);
+    if (deleteError) {
+      if (deleteError.status === 404 || deleteError.message?.includes("User not found")) {
+        await admin.from("profiles").delete().eq("id", userId);
+        return Response.json({ success: true, deleted: "profile_only" }, { headers });
+      }
+      return Response.json({ error: deleteError.message }, { status: 502, headers });
+    }
+    return Response.json({ success: true, deleted: "auth_identity" }, { headers });
   }
 
   if (!/^\S+@\S+\.\S+$/.test(email) || !ADMIN_ROLES.has(role)) {

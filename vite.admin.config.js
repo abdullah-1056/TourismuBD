@@ -221,7 +221,7 @@ function localAdminDataPlugin(env) {
             return response.end(JSON.stringify({ error: "This Admin request method is not supported." }));
           }
           const functionName = parsed.searchParams.get("function") || "";
-          if (!["assign_secondary_admin", "remove_secondary_admin", "invite_secondary_admin"].includes(functionName)) {
+          if (!["assign_secondary_admin", "remove_secondary_admin", "invite_secondary_admin", "delete_user"].includes(functionName)) {
             response.statusCode = 400;
             return response.end(JSON.stringify({ error: "This Admin action is not available through local development access." }));
           }
@@ -391,7 +391,7 @@ function localAdminDataPlugin(env) {
                 return response.end(JSON.stringify({ error: "Secondary Admin account not found." }));
               }
               if (account.user_id) {
-                const profileQuery = new URLSearchParams({ select: "is_admin_only", id: `eq.${account.user_id}`, limit: "1" });
+                const profileQuery = new URLSearchParams({ select: "id,email,role,is_admin_only", id: `eq.${account.user_id}`, limit: "1" });
                 const profileCheck = await fetch(`${admin.url}/rest/v1/profiles?${profileQuery}`, {
                   headers: { apikey: admin.serviceKey, Authorization: `Bearer ${admin.serviceKey}` },
                 });
@@ -400,18 +400,28 @@ function localAdminDataPlugin(env) {
                   response.statusCode = profileCheck.status;
                   return response.end(JSON.stringify({ error: profiles?.message || profiles?.error || "Supabase rejected the Secondary Admin profile lookup." }));
                 }
-                if (Array.isArray(profiles) && profiles[0]?.is_admin_only) {
-                  const deleted = await fetch(`${admin.url}/auth/v1/admin/users/${encodeURIComponent(account.user_id)}`, {
-                    method: "DELETE",
-                    headers: { apikey: admin.serviceKey, Authorization: `Bearer ${admin.serviceKey}` },
-                  });
-                  const deletedResult = await deleted.json().catch(() => null);
-                  if (!deleted.ok) {
-                    response.statusCode = deleted.status;
-                    return response.end(JSON.stringify({ error: deletedResult?.message || deletedResult?.msg || deletedResult?.error || "Supabase could not delete the Secondary Admin login." }));
-                  }
-                  return response.end(JSON.stringify({ data: { deleted: "auth_identity" } }));
+                const profile = Array.isArray(profiles) ? profiles[0] : null;
+                if (profile?.role === "SUPER_ADMIN" || profile?.email?.toLowerCase() === "mdabdullah200211@gmail.com") {
+                  response.statusCode = 403;
+                  return response.end(JSON.stringify({ error: "The Super Admin account cannot be deleted." }));
                 }
+
+                // Pre-clean child records that may have restrictive foreign keys
+                await fetch(`${admin.url}/rest/v1/reports?created_by=eq.${encodeURIComponent(account.user_id)}`, { method: "DELETE", headers: { apikey: admin.serviceKey, Authorization: `Bearer ${admin.serviceKey}` } }).catch(() => null);
+                await fetch(`${admin.url}/rest/v1/reviews?traveler_id=eq.${encodeURIComponent(account.user_id)}`, { method: "DELETE", headers: { apikey: admin.serviceKey, Authorization: `Bearer ${admin.serviceKey}` } }).catch(() => null);
+                await fetch(`${admin.url}/rest/v1/bookings?traveler_id=eq.${encodeURIComponent(account.user_id)}`, { method: "DELETE", headers: { apikey: admin.serviceKey, Authorization: `Bearer ${admin.serviceKey}` } }).catch(() => null);
+                await fetch(`${admin.url}/rest/v1/admin_accounts?id=eq.${encodeURIComponent(adminAccountId)}`, { method: "DELETE", headers: { apikey: admin.serviceKey, Authorization: `Bearer ${admin.serviceKey}` } }).catch(() => null);
+
+                const deleted = await fetch(`${admin.url}/auth/v1/admin/users/${encodeURIComponent(account.user_id)}`, {
+                  method: "DELETE",
+                  headers: { apikey: admin.serviceKey, Authorization: `Bearer ${admin.serviceKey}` },
+                });
+                const deletedResult = await deleted.json().catch(() => null);
+                if (!deleted.ok && deleted.status !== 404) {
+                  response.statusCode = deleted.status;
+                  return response.end(JSON.stringify({ error: deletedResult?.message || deletedResult?.msg || deletedResult?.error || "Supabase could not delete the Secondary Admin login." }));
+                }
+                return response.end(JSON.stringify({ data: { deleted: "auth_identity" } }));
               }
               const upstream = await callRpc("remove_secondary_admin", { admin_account_id: adminAccountId });
               const result = await upstream.json().catch(() => null);
@@ -420,6 +430,70 @@ function localAdminDataPlugin(env) {
                 return response.end(JSON.stringify({ error: result?.message || result?.error || "Supabase rejected the Admin action." }));
               }
               return response.end(JSON.stringify({ data: { deleted: "admin_access" } }));
+            }
+            if (functionName === "delete_user") {
+              const targetUserId = typeof payload?.user_id === "string" ? payload.user_id.trim() : "";
+              if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(targetUserId)) {
+                response.statusCode = 400;
+                return response.end(JSON.stringify({ error: "A valid user ID is required." }));
+              }
+              const profileQuery = new URLSearchParams({ select: "id,email,role", id: `eq.${targetUserId}`, limit: "1" });
+              const profileCheck = await fetch(`${admin.url}/rest/v1/profiles?${profileQuery}`, {
+                headers: { apikey: admin.serviceKey, Authorization: `Bearer ${admin.serviceKey}` },
+              });
+              const profiles = await profileCheck.json().catch(() => null);
+              const profile = Array.isArray(profiles) ? profiles[0] : null;
+              if (profile && (profile.role === "SUPER_ADMIN" || profile.email?.toLowerCase() === "mdabdullah200211@gmail.com")) {
+                response.statusCode = 403;
+                return response.end(JSON.stringify({ error: "The Super Admin account cannot be deleted." }));
+              }
+
+              // Pre-clean child records that may have restrictive foreign keys
+              await fetch(`${admin.url}/rest/v1/reports?created_by=eq.${encodeURIComponent(targetUserId)}`, { method: "DELETE", headers: { apikey: admin.serviceKey, Authorization: `Bearer ${admin.serviceKey}` } }).catch(() => null);
+              await fetch(`${admin.url}/rest/v1/reviews?traveler_id=eq.${encodeURIComponent(targetUserId)}`, { method: "DELETE", headers: { apikey: admin.serviceKey, Authorization: `Bearer ${admin.serviceKey}` } }).catch(() => null);
+              await fetch(`${admin.url}/rest/v1/bookings?traveler_id=eq.${encodeURIComponent(targetUserId)}`, { method: "DELETE", headers: { apikey: admin.serviceKey, Authorization: `Bearer ${admin.serviceKey}` } }).catch(() => null);
+
+              // Providers cleanup
+              const provQuery = new URLSearchParams({ select: "id", user_id: `eq.${targetUserId}` });
+              const provRes = await fetch(`${admin.url}/rest/v1/providers?${provQuery}`, { headers: { apikey: admin.serviceKey, Authorization: `Bearer ${admin.serviceKey}` } }).catch(() => null);
+              const provList = await provRes?.json().catch(() => null);
+              if (Array.isArray(provList)) {
+                for (const prov of provList) {
+                  await fetch(`${admin.url}/rest/v1/bookings?provider_id=eq.${encodeURIComponent(prov.id)}`, { method: "DELETE", headers: { apikey: admin.serviceKey, Authorization: `Bearer ${admin.serviceKey}` } }).catch(() => null);
+                }
+              }
+
+              // Businesses cleanup
+              const bizQuery = new URLSearchParams({ select: "id", user_id: `eq.${targetUserId}` });
+              const bizRes = await fetch(`${admin.url}/rest/v1/businesses?${bizQuery}`, { headers: { apikey: admin.serviceKey, Authorization: `Bearer ${admin.serviceKey}` } }).catch(() => null);
+              const bizList = await bizRes?.json().catch(() => null);
+              if (Array.isArray(bizList)) {
+                for (const biz of bizList) {
+                  await fetch(`${admin.url}/rest/v1/business_products?business_id=eq.${encodeURIComponent(biz.id)}`, { method: "DELETE", headers: { apikey: admin.serviceKey, Authorization: `Bearer ${admin.serviceKey}` } }).catch(() => null);
+                }
+              }
+
+              // Admin accounts cleanup
+              await fetch(`${admin.url}/rest/v1/admin_accounts?user_id=eq.${encodeURIComponent(targetUserId)}`, { method: "DELETE", headers: { apikey: admin.serviceKey, Authorization: `Bearer ${admin.serviceKey}` } }).catch(() => null);
+
+              // Delete from Supabase Auth
+              const deleted = await fetch(`${admin.url}/auth/v1/admin/users/${encodeURIComponent(targetUserId)}`, {
+                method: "DELETE",
+                headers: { apikey: admin.serviceKey, Authorization: `Bearer ${admin.serviceKey}` },
+              });
+              const deletedResult = await deleted.json().catch(() => null);
+              if (!deleted.ok) {
+                if (deleted.status === 404) {
+                  await fetch(`${admin.url}/rest/v1/profiles?id=eq.${encodeURIComponent(targetUserId)}`, {
+                    method: "DELETE",
+                    headers: { apikey: admin.serviceKey, Authorization: `Bearer ${admin.serviceKey}` },
+                  });
+                  return response.end(JSON.stringify({ data: { success: true, deleted: "profile_only" } }));
+                }
+                response.statusCode = deleted.status;
+                return response.end(JSON.stringify({ error: deletedResult?.message || deletedResult?.msg || deletedResult?.error || "Supabase could not delete the user account." }));
+              }
+              return response.end(JSON.stringify({ data: { success: true, deleted: "auth_identity" } }));
             }
             const upstream = await callRpc(functionName, payload);
             const result = await upstream.json().catch(() => null);
