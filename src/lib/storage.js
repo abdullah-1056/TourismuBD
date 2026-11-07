@@ -54,3 +54,28 @@ export function saveBooking(booking) {
   if (!validation.valid) throw new RangeError(validation.error);
   return save(BOOKINGS_KEY, booking, "booking");
 }
+
+const ORDERS_KEY = "tourismubd.orders.v1";
+export function loadUserOrders(userId) {
+  const key = accountKey(ORDERS_KEY, userId);
+  return key ? read(key) : [];
+}
+
+export function saveUserOrder(order, userId) {
+  const key = accountKey(ORDERS_KEY, userId);
+  if (!key) throw new Error("Sign in to place an order.");
+  return save(key, order, "order");
+}
+
+export function cancelUserOrder(orderId, userId) {
+  const key = accountKey(ORDERS_KEY, userId);
+  if (!key) return null;
+  const records = read(key);
+  const index = records.findIndex((item) => item.id === orderId);
+  if (index !== -1) {
+    records[index] = { ...records[index], status: "CANCELLED", updatedAt: new Date().toISOString() };
+    globalThis.localStorage.setItem(key, JSON.stringify(records));
+    return records[index];
+  }
+  return null;
+}

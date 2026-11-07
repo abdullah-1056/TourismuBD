@@ -540,4 +540,8 @@ assert.match(app, /!protectedView && view === "services"/);
 assert.match(app, /!protectedView && view === "people"/);
 assert.match(app, /!protectedView && view === "feed"/);
 
+assert.match(app, /submitBookingRating/);
+assert.match(app, /function RatingDialog/);
+assert.match(app, /Rate provider/);
+
 console.log("domain tests passed");

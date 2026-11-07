@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { loadSavedTrips, saveTrip } from "../src/lib/storage.js";
+import { loadSavedTrips, saveTrip, loadUserOrders, saveUserOrder, cancelUserOrder } from "../src/lib/storage.js";
 
 const records = new Map();
 const originalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
@@ -13,6 +13,14 @@ saveTrip({ id: "trip-b", name: "B" }, "traveler-b");
 assert.deepEqual(loadSavedTrips("traveler-a").map((trip) => trip.id), ["trip-a"]);
 assert.deepEqual(loadSavedTrips("traveler-b").map((trip) => trip.id), ["trip-b"]);
 assert.deepEqual(loadSavedTrips(), []);
+
+saveUserOrder({ id: "ord-1", product_name: "Handicraft", status: "PENDING" }, "user-1");
+assert.deepEqual(loadUserOrders("user-1").map((ord) => ord.id), ["ord-1"]);
+assert.deepEqual(loadUserOrders("user-2"), []);
+
+cancelUserOrder("ord-1", "user-1");
+const updatedOrders = loadUserOrders("user-1");
+assert.equal(updatedOrders[0].status, "CANCELLED");
 
 if (originalStorage) Object.defineProperty(globalThis, "localStorage", originalStorage);
 else delete globalThis.localStorage;

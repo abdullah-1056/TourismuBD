@@ -1053,6 +1053,8 @@ html[lang="bn"] .hero-content h1 {
 .follower-count svg { width: 17px; color: var(--river); }
 .dashboard-post-action { display: flex; align-self: end; justify-self: end; gap: 10px; }
 .create-post-button { min-height: 36px; padding-block: 7px; }
+.dashboard-order-btn { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; white-space: nowrap; }
+.dashboard-order-btn .owner-menu-booking-count { margin-left: 2px; }
 .post-composer-modal { position: relative; width: min(795px, 100%); min-height: min(560px, calc(100vh - 40px)); max-height: calc(100vh - 40px); overflow: auto; padding: 30px; background: var(--white); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 20px 70px rgb(0 0 0 / 28%); }
 .post-composer-modal .close { position: absolute; top: 15px; right: 15px; }
 .post-report-modal { position: relative; display: grid; width: min(520px, 100%); gap: 14px; padding: 28px; background: var(--white); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 20px 70px rgb(0 0 0 / 28%); }
@@ -1216,6 +1218,31 @@ html[lang="bn"] .hero-content h1 {
 .marketplace-price span, .marketplace-seller { color: var(--muted); font-size: 12px; }
 .marketplace-seller { margin-top: 12px; }
 .marketplace-seller a { color: var(--river-dark); font-weight: 700; }
+.marketplace-controls { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 34px 0 28px; }
+.marketplace-controls .marketplace-search { margin: 0; flex: 1; }
+.marketplace-orders-top-btn { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; white-space: nowrap; padding: 12px 18px; border-radius: 8px; }
+.marketplace-order-badge { background: var(--river, #087f70); color: #fff; font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 9999px; }
+.marketplace-card-action { margin-top: 14px; }
+.marketplace-order-btn { width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; }
+.marketplace-bottom-bar { display: flex; justify-content: center; align-items: center; padding: 48px 0 24px; }
+.marketplace-bottom-my-orders-btn { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-width: 240px; padding: 14px 28px; font-size: 16px; font-weight: 700; border-radius: 9999px; box-shadow: 0 4px 18px rgba(8, 127, 112, 0.28); transition: transform 0.15s ease, box-shadow 0.15s ease; }
+.marketplace-bottom-my-orders-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 24px rgba(8, 127, 112, 0.38); }
+.marketplace-bottom-order-count { background: #fff; color: var(--river-dark, #055b50); font-size: 12px; font-weight: 800; padding: 2px 8px; border-radius: 9999px; }
+.my-orders-tabs { display: flex; gap: 8px; margin: 16px 0 18px; border-bottom: 1px solid var(--line); padding-bottom: 10px; }
+.my-orders-tab { display: inline-flex; align-items: center; gap: 7px; padding: 8px 16px; font-size: 14px; font-weight: 600; border-radius: 6px; border: 1px solid transparent; background: transparent; color: var(--muted); cursor: pointer; transition: all 0.15s ease; }
+.my-orders-tab:hover { color: var(--ink); background: var(--paper); }
+.my-orders-tab.active { color: var(--river-dark); background: var(--paper); border-color: var(--line); font-weight: 700; }
+.my-orders-tab-count { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; font-size: 11px; font-weight: 800; border-radius: 9999px; background: var(--river, #087f70); color: #fff; }
+.my-orders-list { display: grid; gap: 14px; margin-top: 18px; }
+.my-order-item { border: 1px solid var(--line); border-radius: 8px; padding: 16px; background: var(--white); display: grid; gap: 10px; }
+.my-order-head { display: flex; justify-content: space-between; align-items: start; gap: 12px; }
+.my-order-status { font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 9999px; text-transform: uppercase; }
+.my-order-status.pending { background: #fef3c7; color: #92400e; }
+.my-order-status.confirmed { background: #dcfce7; color: #166534; }
+.my-order-status.shipped { background: #e0f2fe; color: #0369a1; }
+.my-order-status.delivered { background: #ccfbf1; color: #0f766e; }
+.my-order-status.cancelled { background: #f1f5f9; color: #64748b; }
+.my-order-details { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); border-top: 1px dashed var(--line); padding-top: 8px; }
 .provider-bookings { max-width: 760px; margin: 38px auto 0; }
 .traveler-ratings { max-width: 760px; margin: 38px auto 0; }
 .provider-bookings-heading { margin-bottom: 16px; }

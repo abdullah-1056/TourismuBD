@@ -66,7 +66,7 @@ import {
 } from "./data/tourism.js";
 import { formatRoadRouteStatus, loadRoadRoute, resolveRouteWaypoints, ROUTE_OUTSIDE_BANGLADESH, routeStaysInsideBangladesh } from "./lib/road-map.js";
 import { findNearbyPlaces, maxTripDaysForPlaceCount, planDailyRoute, planDistrictTour, planRoute } from "./lib/route.js";
-import { loadSavedTrips, saveTrip } from "./lib/storage.js";
+import { loadSavedTrips, saveTrip, loadUserOrders, saveUserOrder, cancelUserOrder } from "./lib/storage.js";
 import { combineShopProducts, searchShopProducts } from "./lib/shop.js";
 import { supabase } from "./lib/supabase.js";
 import { usePublishedTourism } from "./lib/tourism-content.js";
@@ -1156,7 +1156,7 @@ function OwnerMenu({ user, onDeactivate, onSignOut, onOpenAbout, onOpenBookings,
     {open ? <><button type="button" className="owner-menu-backdrop" onClick={() => setOpen(false)} aria-label="Close account menu" /><aside className="owner-menu" role="dialog" aria-modal="true" aria-label="Account menu">
       <div className="owner-menu-head"><b>{t("account.menuTitle")}</b><button type="button" className="icon-button" onClick={() => setOpen(false)} aria-label="Close account menu" title="Close account menu"><X /></button></div>
       <button type="button" className="owner-menu-settings" onClick={() => setSettingsOpen((visible) => !visible)} aria-expanded={settingsOpen}><Settings />{t("account.settings")}<ChevronRight /></button>
-      {settingsOpen ? <div className="owner-menu-settings-content"><button type="button" className="owner-menu-about" onClick={() => { setOpen(false); onOpenAbout(); }}><CircleUserRound />{t("account.about")}<ChevronRight /></button>{isTraveler ? <><button type="button" className="owner-menu-about owner-menu-rating-option" onClick={() => { setOpen(false); onOpenRatings(); }} aria-label={pendingRatings ? `Rate providers, ${pendingRatings} pending` : "Rate providers"}><Star />{t("account.rateProviders")}{pendingRatings ? <span className="owner-menu-rating-count">{pendingRatings > 9 ? "9+" : pendingRatings}</span> : null}<ChevronRight /></button><button type="button" className="owner-menu-about" onClick={() => setPostsOpen((visible) => !visible)} aria-expanded={postsOpen}><Send />{t("nav.timeline")}<ChevronRight /></button>{postsOpen ? <PostAudienceSettings user={user} notify={notify} /> : null}</> : isProvider ? <button type="button" className="owner-menu-about owner-menu-booking-option" onClick={() => { setOpen(false); onOpenBookings(); }} aria-label={pendingBookings ? `Booking requests, ${pendingBookings} pending` : "Booking requests"}><CalendarDays />{t("account.bookings")}{pendingBookings ? <span className="owner-menu-booking-count">{pendingBookings > 9 ? "9+" : pendingBookings}</span> : null}<ChevronRight /></button> : null}<div className="owner-menu-theme"><span>{t("common.theme")}</span><div role="group" aria-label="Color theme"><button type="button" className={theme === "light" ? "active" : ""} onClick={() => onThemeChange("light")} aria-pressed={theme === "light"}><Sun />{t("common.light")}</button><button type="button" className={theme === "dark" ? "active" : ""} onClick={() => onThemeChange("dark")} aria-pressed={theme === "dark"}><Moon />{t("common.dark")}</button></div></div><div className="owner-menu-theme"><span>{t("common.language")}</span><div role="group" aria-label="Language selection"><button type="button" className={lang === "en" ? "active" : ""} onClick={() => setLang("en")} aria-pressed={lang === "en"}>English</button><button type="button" className={lang === "bn" ? "active" : ""} onClick={() => setLang("bn")} aria-pressed={lang === "bn"}>বাংলা</button></div></div></div> : null}
+      {settingsOpen ? <div className="owner-menu-settings-content"><button type="button" className="owner-menu-about" onClick={() => { setOpen(false); onOpenAbout(); }}><CircleUserRound />{t("account.about")}<ChevronRight /></button>{isTraveler ? <><button type="button" className="owner-menu-about owner-menu-rating-option" onClick={() => { setOpen(false); onOpenRatings(); }} aria-label={pendingRatings ? `Rate providers, ${pendingRatings} pending` : "Rate providers"}><Star />{t("account.rateProviders")}{pendingRatings ? <span className="owner-menu-rating-count">{pendingRatings > 9 ? "9+" : pendingRatings}</span> : null}<ChevronRight /></button><button type="button" className="owner-menu-about" onClick={() => setPostsOpen((visible) => !visible)} aria-expanded={postsOpen}><Send />{t("nav.timeline")}<ChevronRight /></button>{postsOpen ? <PostAudienceSettings user={user} notify={notify} /> : null}</> : null}<div className="owner-menu-theme"><span>{t("common.theme")}</span><div role="group" aria-label="Color theme"><button type="button" className={theme === "light" ? "active" : ""} onClick={() => onThemeChange("light")} aria-pressed={theme === "light"}><Sun />{t("common.light")}</button><button type="button" className={theme === "dark" ? "active" : ""} onClick={() => onThemeChange("dark")} aria-pressed={theme === "dark"}><Moon />{t("common.dark")}</button></div></div><div className="owner-menu-theme"><span>{t("common.language")}</span><div role="group" aria-label="Language selection"><button type="button" className={lang === "en" ? "active" : ""} onClick={() => setLang("en")} aria-pressed={lang === "en"}>English</button><button type="button" className={lang === "bn" ? "active" : ""} onClick={() => setLang("bn")} aria-pressed={lang === "bn"}>বাংলা</button></div></div></div> : null}
       {isBusiness ? <button type="button" className="owner-menu-about" onClick={() => { setOpen(false); onOpenBusinessCatalog(); }}><Store />{t("account.manageShop")}<ChevronRight /></button> : null}
       <button type="button" className="owner-menu-about" onClick={() => { setOpen(false); onOpenMessages(); }}><MessageSquare />{t("account.messages")}{/* Messages<ChevronRight */}<ChevronRight /></button>
       <button type="button" className="owner-menu-deactivate" onClick={() => { setOpen(false); onDeactivate(); }}>{t("account.deactivate")}<UserRoundX /></button>
@@ -1165,10 +1165,202 @@ function OwnerMenu({ user, onDeactivate, onSignOut, onOpenAbout, onOpenBookings,
   </>;
 }
 
-function ProviderDashboard({ user, notify }) {
+function CancelBookingDialog({ booking, onClose, onConfirm }) {
   const { lang } = useLanguage();
+  const dialogRef = useRef(null);
+  const [cancelling, setCancelling] = useState(false);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (dialog && !dialog.open) dialog.showModal();
+    return () => dialog?.open && dialog.close();
+  }, []);
+
+  const cancelBooking = async (event) => {
+    event.preventDefault();
+    setCancelling(true);
+    if (await onConfirm()) onClose();
+    else setCancelling(false);
+  };
+
+  const displayName = booking.traveler_name || booking.providers?.service_name || booking.providers?.display_name || (lang === "bn" ? "এই সেবা" : "this service");
+
+  return <dialog ref={dialogRef} className="provider-dialog" onCancel={(event) => { event.preventDefault(); onClose(); }} onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <form className="modal booking-cancel-modal" onSubmit={cancelBooking} onMouseDown={(event) => event.stopPropagation()} aria-labelledby="cancel-booking-title">
+      <button type="button" className="icon-button close" onClick={onClose} aria-label={lang === "bn" ? "বন্ধ করুন" : "Close"}><X /></button>
+      <p className="eyebrow">{lang === "bn" ? "বুকিং বাতিল" : "Cancel booking"}</p>
+      <h2 id="cancel-booking-title">{lang === "bn" ? `${displayName}-এর অনুরোধ বাতিল করবেন?` : `Cancel request for ${displayName}?`}</h2>
+      <p>{lang === "bn" ? "বুকিংটি বাতিল হিসেবে চিহ্নিত হবে।" : "The booking will be marked as cancelled."}</p>
+      <div className="modal-actions"><button type="button" className="button secondary" onClick={onClose}>{lang === "bn" ? "বুকিং রাখুন" : "Keep booking"}</button><button className="button booking-cancel-confirm" disabled={cancelling}>{cancelling ? (lang === "bn" ? "বাতিল হচ্ছে..." : "Cancelling...") : (lang === "bn" ? "অনুরোধ বাতিল করুন" : "Cancel request")}</button></div>
+    </form>
+  </dialog>;
+}
+
+function bookingStatusLabel(status, lang) {
+  if (lang !== "bn") return (status || "pending").toLowerCase();
+  const map = { pending: "অপেক্ষমাণ", confirmed: "নিশ্চিত", completed: "সম্পন্ন", cancelled: "বাতিল" };
+  return map[(status || "pending").toLowerCase()] || (status || "pending").toLowerCase();
+}
+
+function RatingDialog({ booking, onClose, onSubmit }) {
+  const { lang } = useLanguage();
+  const dialogRef = useRef(null);
+  const [rating, setRating] = useState(0);
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (dialog && !dialog.open) dialog.showModal();
+    return () => dialog?.open && dialog.close();
+  }, []);
+
+  const submit = async (event) => {
+    event.preventDefault();
+    if (!rating) return;
+    setSubmitting(true);
+    if (await onSubmit(booking, rating)) onClose();
+    else setSubmitting(false);
+  };
+
+  const displayName = booking?.provider_name || booking?.providers?.service_name || booking?.providers?.display_name || (lang === "bn" ? "সেবা প্রদানকারী" : "provider");
+
+  return <dialog ref={dialogRef} className="provider-dialog" onCancel={(event) => { event.preventDefault(); onClose(); }} onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <form className="modal rating-modal" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()} aria-labelledby="rating-title">
+      <button type="button" className="icon-button close" onClick={onClose} aria-label={lang === "bn" ? "বন্ধ করুন" : "Close"}><X /></button>
+      <p className="eyebrow">{lang === "bn" ? "সম্পন্ন বুকিং" : "Completed booking"}</p>
+      <h2 id="rating-title">{lang === "bn" ? `${displayName}-কে রেটিং দিন` : `Rate ${displayName}`}</h2>
+      <p>{lang === "bn" ? "আপনার অভিজ্ঞতা কেমন ছিল? আপনার দেওয়া রেটিং এই প্রোভাইডারের পাবলিক প্রোফাইলে প্রদর্শিত হবে।" : "How was your experience? Your rating will be visible on this provider's public profile."}</p>
+      <div className="rating-picker" role="group" aria-label="Choose a rating from 1 to 5 stars">{[1, 2, 3, 4, 5].map((value) => <button type="button" key={value} className={rating >= value ? "active" : ""} onClick={() => setRating(value)} aria-label={`${value} star${value === 1 ? "" : "s"}`} aria-pressed={rating === value}><Star /></button>)}</div>
+      <div className="modal-actions"><button type="button" className="button secondary" onClick={onClose}>{lang === "bn" ? "এখন নয়" : "Not now"}</button><button className="button primary" disabled={!rating || submitting}>{submitting ? (lang === "bn" ? "জমা হচ্ছে..." : "Submitting...") : (lang === "bn" ? "রেটিং জমা দিন" : "Submit rating")}</button></div>
+    </form>
+  </dialog>;
+}
+
+function useUserOrders(user) {
+  const [orders, setOrders] = useState(() => (user?.id ? loadUserOrders(user.id) : []));
+  const [providerBookings, setProviderBookings] = useState([]);
+  const [travelerBookings, setTravelerBookings] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  useEffect(() => {
+    if (!user?.id) {
+      setOrders([]);
+      setProviderBookings([]);
+      setTravelerBookings([]);
+      return;
+    }
+    let active = true;
+    const local = loadUserOrders(user.id);
+    if (active) setOrders(local);
+
+    if (supabase) {
+      setLoading(true);
+      Promise.allSettled([
+        supabase
+          .from("provider_booking_requests")
+          .select("id,traveler_id,traveler_name,traveler_avatar_url,service_type,start_date,duration_days,traveler_count,status,created_at")
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("bookings")
+          .select("id,provider_id,service_type,start_date,duration_days,traveler_count,status,created_at,providers(display_name,service_name,type,contact_phone,contact_email),reviews(id,rating,created_at)")
+          .eq("traveler_id", user.id)
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("product_orders")
+          .select("*")
+          .order("created_at", { ascending: false }),
+      ]).then(([pRes, tRes, oRes]) => {
+        if (!active) return;
+        setLoading(false);
+        if (pRes.status === "fulfilled" && !pRes.value.error && Array.isArray(pRes.value.data)) {
+          setProviderBookings(pRes.value.data);
+        }
+        if (tRes.status === "fulfilled" && !tRes.value.error && Array.isArray(tRes.value.data)) {
+          setTravelerBookings(tRes.value.data);
+        }
+        if (oRes.status === "fulfilled" && !oRes.value.error && Array.isArray(oRes.value.data)) {
+          setOrders(oRes.value.data.length ? oRes.value.data : local);
+        }
+      });
+    }
+
+    return () => {
+      active = false;
+    };
+  }, [user?.id, refreshKey]);
+
+  const cancelOrder = async (orderId) => {
+    cancelUserOrder(orderId, user?.id);
+    if (supabase) {
+      try {
+        await supabase.from("product_orders").update({ status: "CANCELLED" }).eq("id", orderId);
+      } catch {}
+    }
+    setOrders((current) => current.map((ord) => (ord.id === orderId ? { ...ord, status: "CANCELLED" } : ord)));
+    setRefreshKey((v) => v + 1);
+  };
+
+  const updateOrderStatus = async (orderId, status) => {
+    if (supabase) {
+      try {
+        await supabase.from("product_orders").update({ status }).eq("id", orderId);
+      } catch {}
+    }
+    setOrders((current) => current.map((ord) => (ord.id === orderId ? { ...ord, status } : ord)));
+    setRefreshKey((v) => v + 1);
+  };
+
+  const updateBookingStatus = async (bookingId, status) => {
+    if (!supabase) return;
+    const { error } = await supabase.from("bookings").update({ status }).eq("id", bookingId);
+    if (!error) {
+      setRefreshKey((v) => v + 1);
+    }
+    return error;
+  };
+
+  const submitBookingRating = async (booking, rating) => {
+    if (!supabase) return { error: new Error("Supabase not connected") };
+    if (booking.status === "CONFIRMED") {
+      const { error: statusErr } = await supabase.from("bookings").update({ status: "COMPLETED" }).eq("id", booking.id);
+      if (statusErr) return { error: statusErr };
+    }
+    const { error } = await supabase.from("reviews").insert({ booking_id: booking.id, traveler_id: user?.id, rating });
+    if (!error || error.code === "23505") {
+      setRefreshKey((v) => v + 1);
+    }
+    return { error };
+  };
+
+  const totalCount = (providerBookings.length || travelerBookings.length) + orders.length;
+  const pendingCount =
+    providerBookings.filter((b) => b.status === "PENDING").length +
+    travelerBookings.filter((b) => b.status === "PENDING").length +
+    orders.filter((o) => (o.status || "PENDING") === "PENDING").length;
+
+  return {
+    orders,
+    providerBookings,
+    travelerBookings,
+    totalCount,
+    pendingCount,
+    loading,
+    cancelOrder,
+    updateOrderStatus,
+    updateBookingStatus,
+    submitBookingRating,
+    refreshOrders: () => setRefreshKey((v) => v + 1),
+  };
+}
+
+
+
+function ProviderDashboard({ user, notify, onOpenOrders }) {
+  const { lang, toBengaliNumber } = useLanguage();
   const [state, setState] = useState({ loading: true, profile: null, provider: null, rating: null, error: "", detailsAvailable: true });
   const [postVersion, setPostVersion] = useState(0);
+  const { totalCount } = useUserOrders(user);
 
   useEffect(() => {
     let active = true;
@@ -1188,7 +1380,7 @@ function ProviderDashboard({ user, notify }) {
 
   const { profile, provider, rating } = state;
   return <main className="page-shell page-top provider-dashboard">
-    <div className="page-title dashboard-title"><ProfileAvatar user={user} profile={profile || {}} provider={provider} notify={notify} onSaved={(nextProfile) => setState((current) => ({ ...current, profile: nextProfile }))} /><div><p className="eyebrow">{lang === "bn" ? "হ্যালো," : "Hello,"}</p><h1 className="dashboard-greeting">{profile?.full_name || provider?.display_name || (lang === "bn" ? "সেবা প্রদানকারী" : "provider")}</h1><ProviderRating profile={rating || {}} /><ProfileBio profile={{ ...profile, bio: profile?.bio || provider?.bio }} fallback={lang === "bn" ? "নিচে আপনার পরিচিতি যোগ করুন।" : "Add your bio below."} /><DashboardFollowerCount userId={user.id} /></div><div className="dashboard-post-action"><PostPublisher user={user} notify={notify} onPublished={() => setPostVersion((version) => version + 1)} /></div></div>
+    <div className="page-title dashboard-title"><ProfileAvatar user={user} profile={profile || {}} provider={provider} notify={notify} onSaved={(nextProfile) => setState((current) => ({ ...current, profile: nextProfile }))} /><div><p className="eyebrow">{lang === "bn" ? "হ্যালো," : "Hello,"}</p><h1 className="dashboard-greeting">{profile?.full_name || provider?.display_name || (lang === "bn" ? "সেবা প্রদানকারী" : "provider")}</h1><ProviderRating profile={rating || {}} /><ProfileBio profile={{ ...profile, bio: profile?.bio || provider?.bio }} fallback={lang === "bn" ? "নিচে আপনার পরিচিতি যোগ করুন।" : "Add your bio below."} /><DashboardFollowerCount userId={user.id} /></div><div className="dashboard-post-action"><button type="button" className="button secondary create-post-button dashboard-order-btn" onClick={onOpenOrders} title={lang === "bn" ? "আমার অর্ডারসমূহ" : "My orders"}><ShoppingBag size={17} /><span>{lang === "bn" ? "আমার অর্ডার" : "My order"}</span>{totalCount ? <span className="owner-menu-booking-count">{toBengaliNumber(totalCount)}</span> : null}</button><PostPublisher user={user} notify={notify} onPublished={() => setPostVersion((version) => version + 1)} /></div></div>
     {provider ? <section className="provider-dashboard-panel" aria-label={lang === "bn" ? "প্রোভাইডার অ্যাকাউন্টের বিবরণ" : "Provider account details"}>
       <div><span>{lang === "bn" ? "সেবার ধরন" : "Provider type"}</span><b>{lang === "bn" ? (PROVIDER_ROLE_LABELS_BN[profile?.role] || provider.type) : (PROVIDER_TYPE_LABELS[profile?.role] || provider.type)}</b></div>
       <div><span>{lang === "bn" ? "সার্ভিসের নাম" : "Service name"}</span>{/* Service name */}<b>{provider.service_name || (lang === "bn" ? "যুক্ত করা হয়নি" : "Not added")}</b></div>
@@ -1199,21 +1391,360 @@ function ProviderDashboard({ user, notify }) {
 }
 
 function ProviderBookingRequestsPage({ user, notify, onBack }) {
-  const { lang } = useLanguage();
-  const [state, setState] = useState({ loading: true, provider: null, error: "" });
+  const { lang, toBengaliNumber } = useLanguage();
+  const {
+    orders,
+    providerBookings,
+    travelerBookings,
+    loading,
+    cancelOrder,
+    updateOrderStatus,
+    updateBookingStatus,
+    submitBookingRating,
+  } = useUserOrders(user);
 
-  useEffect(() => {
-    let active = true;
-    supabase.from("providers").select("id").eq("user_id", user.id).maybeSingle().then(({ data, error }) => {
-      if (active) setState({ loading: false, provider: data, error: error?.message || "" });
-    });
-    return () => { active = false; };
-  }, [user.id]);
+  const bookingsCount = (providerBookings?.length || 0) + (travelerBookings?.length || 0);
+  const productsCount = orders?.length || 0;
+  const [activeTab, setActiveTab] = useState(() => (bookingsCount > 0 ? "bookings" : productsCount > 0 ? "products" : "bookings"));
+  const [updatingId, setUpdatingId] = useState(null);
+  const [cancellingBooking, setCancellingBooking] = useState(null);
+  const [ratingBooking, setRatingBooking] = useState(null);
 
-  if (state.loading) return <main className="page-shell page-top"><p>{lang === "bn" ? "বুকিং অনুরোধ লোড হচ্ছে..." : "Loading booking requests..."}</p></main>;
-  if (state.error) return <main className="page-shell page-top"><p className="form-error">{state.error}</p></main>;
-  if (!state.provider) return <main className="page-shell page-top"><p className="form-error">{lang === "bn" ? "বুকিং অনুরোধ দেখতে প্রোভাইডার অ্যাকাউন্ট প্রয়োজন।" : "A provider account is required to view booking requests."}</p></main>;
-  return <main className="page-shell page-top provider-booking-requests-page"><button type="button" className="back-button" onClick={onBack}><ArrowLeft />{lang === "bn" ? "অ্যাকাউন্টে ফিরে যান" : "Back to account"}</button><ProviderBookings provider={state.provider} notify={notify} /></main>;
+  const handleStatusChange = async (booking, status) => {
+    setUpdatingId(booking.id);
+    const err = await updateBookingStatus(booking.id, status);
+    setUpdatingId(null);
+    if (err) {
+      notify?.(err.message);
+      return;
+    }
+    notify?.(
+      status === "CONFIRMED"
+        ? (lang === "bn" ? "বুকিং নিশ্চিত হয়েছে।" : "Booking confirmed.")
+        : status === "CANCELLED"
+        ? (lang === "bn" ? "বুকিং বাতিল হয়েছে।" : "Booking cancelled.")
+        : (lang === "bn" ? "বুকিং সম্পন্ন চিহ্নিত হয়েছে।" : "Booking marked completed.")
+    );
+  };
+
+  const handleRatingSubmit = async (booking, rating) => {
+    const res = await submitBookingRating(booking, rating);
+    if (res?.error) {
+      if (res.error.code === "23505") {
+        notify?.(lang === "bn" ? "আপনি ইতোমধ্যে এই প্রোভাইডারকে রেটিং দিয়েছেন।" : "You already rated this provider.");
+        return true;
+      }
+      notify?.(res.error.message);
+      return false;
+    }
+    notify?.(lang === "bn" ? "আপনার প্রোভাইডার রেটিং জমা হয়েছে।" : "Your provider rating was submitted.");
+    return true;
+  };
+
+  return (
+    <main className="page-shell page-top provider-booking-requests-page">
+      <button type="button" className="back-button" onClick={onBack}>
+        <ArrowLeft />
+        {lang === "bn" ? "ড্যাশবোর্ডে ফিরে যান" : "Back to dashboard"}
+      </button>
+
+      <div className="my-orders-tabs" role="tablist" style={{ margin: "20px auto 0", maxWidth: 760 }}>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "bookings"}
+          className={`my-orders-tab ${activeTab === "bookings" ? "active" : ""}`}
+          onClick={() => setActiveTab("bookings")}
+        >
+          <CalendarDays size={16} />
+          <span>{lang === "bn" ? "সেবা বুকিং" : "Service bookings"}</span>
+          {bookingsCount ? (
+            <span className="my-orders-tab-count">{toBengaliNumber(bookingsCount)}</span>
+          ) : null}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "products"}
+          className={`my-orders-tab ${activeTab === "products" ? "active" : ""}`}
+          onClick={() => setActiveTab("products")}
+        >
+          <ShoppingBag size={16} />
+          <span>{lang === "bn" ? "পণ্যের অর্ডার" : "Product orders"}</span>
+          {productsCount ? (
+            <span className="my-orders-tab-count">{toBengaliNumber(productsCount)}</span>
+          ) : null}
+        </button>
+      </div>
+
+      {activeTab === "bookings" ? (
+        <section className="provider-bookings" aria-labelledby="provider-bookings-title" style={{ marginTop: 24 }}>
+          <div className="provider-bookings-heading">
+            <div>
+              <p className="eyebrow">{lang === "bn" ? "বুকিং অনুরোধ" : "Booking requests"}</p>
+              <h2 id="provider-bookings-title">{lang === "bn" ? "আপনার সেবার অনুরোধসমূহ" : "Your service requests"}</h2>
+            </div>
+          </div>
+          {loading ? <p className="form-note">{lang === "bn" ? "বুকিং অনুরোধ লোড হচ্ছে..." : "Loading booking requests..."}</p> : null}
+          {!loading && providerBookings.length === 0 && travelerBookings.length === 0 ? (
+            <p className="booking-empty">{lang === "bn" ? "ভ্রমণকারীদের নতুন বুকিং অনুরোধ এখানে প্রদর্শিত হবে।" : "New traveler booking requests will appear here."}</p>
+          ) : null}
+          {providerBookings.length > 0 ? (
+            <div className="booking-list">
+              {providerBookings.map((booking) => (
+                <article className="booking-card" key={booking.id}>
+                  <div>
+                    <p className="eyebrow">{SERVICE_META[booking.service_type]?.label || booking.service_type}</p>
+                    <div className="booking-requester">
+                      <span>{booking.traveler_avatar_url ? <img src={booking.traveler_avatar_url} alt="" /> : <CircleUserRound />}</span>
+                      <h3>{booking.traveler_name}</h3>
+                    </div>
+                    <p>
+                      {new Date(`${booking.start_date}T12:00:00`).toLocaleDateString(lang === "bn" ? "bn-BD" : undefined, { day: "numeric", month: "short", year: "numeric" })} · {toBengaliNumber(booking.duration_days)} {lang === "bn" ? "দিন" : (booking.duration_days === 1 ? "day" : "days")} · {toBengaliNumber(booking.traveler_count)} {lang === "bn" ? "জন ভ্রমণকারী" : (booking.traveler_count === 1 ? "traveler" : "travelers")}
+                    </p>
+                  </div>
+                  <div className="booking-card-action">
+                    <span className={`booking-status ${(booking.status || "pending").toLowerCase()}`}>
+                      {bookingStatusLabel(booking.status, lang)}
+                    </span>
+                    {booking.status === "PENDING" ? (
+                      <button
+                        type="button"
+                        className="button primary"
+                        onClick={() => handleStatusChange(booking, "CONFIRMED")}
+                        disabled={updatingId === booking.id}
+                      >
+                        {updatingId === booking.id ? (lang === "bn" ? "নিশ্চিত হচ্ছে..." : "Confirming...") : (lang === "bn" ? "বুকিং নিশ্চিত করুন" : "Confirm booking")}
+                      </button>
+                    ) : null}
+                    {booking.status === "CONFIRMED" ? (
+                      <button
+                        type="button"
+                        className="button primary"
+                        onClick={() => handleStatusChange(booking, "COMPLETED")}
+                        disabled={updatingId === booking.id}
+                      >
+                        {updatingId === booking.id ? (lang === "bn" ? "আপডেট হচ্ছে..." : "Updating...") : (lang === "bn" ? "সম্পন্ন চিহ্নিত করুন" : "Mark completed")}
+                      </button>
+                    ) : null}
+                    {["PENDING", "CONFIRMED"].includes(booking.status) ? (
+                      <button
+                        type="button"
+                        className="button secondary booking-cancel"
+                        onClick={() => setCancellingBooking(booking)}
+                        disabled={updatingId === booking.id}
+                      >
+                        {lang === "bn" ? "বুকিং বাতিল করুন" : "Cancel booking"}
+                      </button>
+                    ) : null}
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : travelerBookings.length > 0 ? (
+            <div className="booking-list">
+              {travelerBookings.map((booking) => {
+                const userReview = Array.isArray(booking.reviews) ? booking.reviews[0] : booking.reviews;
+                const reviewRating = userReview?.rating;
+                return (
+                  <article className="booking-card" key={booking.id}>
+                    <div>
+                      <p className="eyebrow">{SERVICE_META[booking.service_type]?.label || booking.service_type}</p>
+                      <h3>{booking.providers?.service_name || booking.providers?.display_name || (lang === "bn" ? "সেবা প্রদানকারী" : "Service provider")}</h3>
+                      <p>
+                        {new Date(`${booking.start_date}T12:00:00`).toLocaleDateString(lang === "bn" ? "bn-BD" : undefined, { day: "numeric", month: "short", year: "numeric" })} · {toBengaliNumber(booking.duration_days)} {lang === "bn" ? "দিন" : (booking.duration_days === 1 ? "day" : "days")} · {toBengaliNumber(booking.traveler_count)} {lang === "bn" ? "জন ভ্রমণকারী" : (booking.traveler_count === 1 ? "traveler" : "travelers")}
+                      </p>
+                      {["CONFIRMED", "COMPLETED"].includes(booking.status) && booking.providers?.contact_phone ? (
+                        <p style={{ margin: "4px 0 0", fontSize: 13, color: "var(--muted)" }}>
+                          <b>{lang === "bn" ? "যোগাযোগ" : "Contact"}:</b> <a href={`tel:${booking.providers.contact_phone}`}>{booking.providers.contact_phone}</a>
+                        </p>
+                      ) : null}
+                    </div>
+                    <div className="booking-card-action">
+                      <span className={`booking-status ${(booking.status || "pending").toLowerCase()}`}>
+                        {bookingStatusLabel(booking.status, lang)}
+                      </span>
+                      {booking.status === "PENDING" ? (
+                        <button
+                          type="button"
+                          className="button secondary booking-cancel"
+                          onClick={() => setCancellingBooking(booking)}
+                          disabled={updatingId === booking.id}
+                        >
+                          {lang === "bn" ? "অনুরোধ বাতিল করুন" : "Cancel request"}
+                        </button>
+                      ) : null}
+                      {booking.status === "CONFIRMED" ? (
+                        <>
+                          <button
+                            type="button"
+                            className="button primary"
+                            onClick={async () => {
+                              await handleStatusChange(booking, "COMPLETED");
+                              setRatingBooking(booking);
+                            }}
+                            disabled={updatingId === booking.id}
+                          >
+                            <Check size={16} />
+                            {updatingId === booking.id ? (lang === "bn" ? "আপডেট হচ্ছে..." : "Updating...") : (lang === "bn" ? "ট্যুর সম্পন্ন চিহ্নিত করুন" : "Mark completed")}
+                          </button>
+                          <button
+                            type="button"
+                            className="button secondary"
+                            onClick={() => setRatingBooking(booking)}
+                            disabled={updatingId === booking.id}
+                          >
+                            <Star size={16} />
+                            {lang === "bn" ? "রেটিং দিন" : "Rate provider"}
+                          </button>
+                          <button
+                            type="button"
+                            className="button secondary booking-cancel"
+                            onClick={() => setCancellingBooking(booking)}
+                            disabled={updatingId === booking.id}
+                          >
+                            {lang === "bn" ? "বুকিং বাতিল করুন" : "Cancel booking"}
+                          </button>
+                        </>
+                      ) : null}
+                      {booking.status === "COMPLETED" ? (
+                        reviewRating ? (
+                          <p className="traveler-rating">
+                            <Star />
+                            <b>{toBengaliNumber(reviewRating)}.0</b>
+                            <span>{lang === "bn" ? "আপনার রেটিং" : "Your rating"}</span>
+                          </p>
+                        ) : (
+                          <button
+                            type="button"
+                            className="button primary"
+                            onClick={() => setRatingBooking(booking)}
+                          >
+                            <Star size={16} />
+                            {lang === "bn" ? "রেটিং দিন" : "Rate provider"}
+                          </button>
+                        )
+                      ) : null}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          ) : null}
+        </section>
+      ) : (
+        <section className="provider-bookings" aria-labelledby="provider-orders-title" style={{ marginTop: 24 }}>
+          <div className="provider-bookings-heading">
+            <div>
+              <p className="eyebrow">{lang === "bn" ? "মার্কেটপ্লেস অর্ডার" : "Marketplace orders"}</p>
+              <h2 id="provider-orders-title">{lang === "bn" ? "আপনার পণ্যের অর্ডারসমূহ" : "Your product orders"}</h2>
+            </div>
+          </div>
+          {orders && orders.length ? (
+            <div className="my-orders-list">
+              {orders.map((order) => (
+                <article className="my-order-item" key={order.id}>
+                  <div className="my-order-head">
+                    <div>
+                      <h3 style={{ margin: 0, fontSize: 18 }}>{order.product_name}</h3>
+                      <p style={{ margin: "2px 0 0", color: "var(--muted)", fontSize: 13 }}>
+                        {order.business_name ? `${order.business_name} · ` : ""}{new Date(order.created_at || order.createdAt).toLocaleDateString(lang === "bn" ? "bn-BD" : undefined, { day: "numeric", month: "short", year: "numeric" })}
+                      </p>
+                    </div>
+                    <span className={`my-order-status ${(order.status || "pending").toLowerCase()}`}>
+                      {order.status === "CONFIRMED" ? (lang === "bn" ? "নিশ্চিত" : "Confirmed")
+                        : order.status === "SHIPPED" ? (lang === "bn" ? "পাঠানো হয়েছে" : "Shipped")
+                        : order.status === "DELIVERED" ? (lang === "bn" ? "সরবরাহকৃত" : "Delivered")
+                        : order.status === "CANCELLED" ? (lang === "bn" ? "বাতিল" : "Cancelled")
+                        : (lang === "bn" ? "অপেক্ষমাণ" : "Pending")}
+                    </span>
+                  </div>
+                  <div className="my-order-details">
+                    <span>{lang === "bn" ? "পরিমাণ" : "Qty"}: {toBengaliNumber(order.quantity)}</span>
+                    <span>{lang === "bn" ? "মোট" : "Total"}: <b>৳{toBengaliNumber((order.total_price || (order.product_price * order.quantity) || 0).toLocaleString())}</b></span>
+                  </div>
+                  {order.delivery_address ? (
+                    <p style={{ margin: 0, fontSize: 13, color: "var(--muted)" }}>
+                      <b>{lang === "bn" ? "ঠিকানা" : "Address"}:</b> {order.delivery_address}
+                    </p>
+                  ) : null}
+                  {order.user_id !== user?.id && order.contact_phone ? (
+                    <p style={{ margin: 0, fontSize: 13, color: "var(--muted)" }}>
+                      <b>{lang === "bn" ? "ক্রেতার ফোন" : "Customer phone"}:</b> <a href={`tel:${order.contact_phone}`}>{order.contact_phone}</a>
+                    </p>
+                  ) : order.business_contact ? (
+                    <p style={{ margin: 0, fontSize: 13, color: "var(--muted)" }}>
+                      <b>{lang === "bn" ? "বিক্রেতার যোগাযোগ" : "Seller contact"}:</b> <a href={`tel:${order.business_contact}`}>{order.business_contact}</a>
+                    </p>
+                  ) : null}
+                  {order.note ? (
+                    <p style={{ margin: 0, fontSize: 13, color: "var(--muted)" }}>
+                      <b>{lang === "bn" ? "নোট" : "Note"}:</b> {order.note}
+                    </p>
+                  ) : null}
+                  {order.user_id !== user?.id ? (
+                    <div style={{ marginTop: 6, display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                      {order.status === "PENDING" || !order.status ? (
+                        <>
+                          <button type="button" className="button primary" style={{ padding: "6px 14px", fontSize: 13 }} onClick={() => updateOrderStatus?.(order.id, "CONFIRMED")}>
+                            {lang === "bn" ? "অর্ডার নিশ্চিত করুন" : "Confirm order"}
+                          </button>
+                          <button type="button" className="button secondary danger" style={{ padding: "6px 14px", fontSize: 13 }} onClick={() => updateOrderStatus?.(order.id, "CANCELLED")}>
+                            {lang === "bn" ? "অর্ডার বাতিল করুন" : "Cancel order"}
+                          </button>
+                        </>
+                      ) : null}
+                      {order.status === "CONFIRMED" ? (
+                        <button type="button" className="button primary" style={{ padding: "6px 14px", fontSize: 13 }} onClick={() => updateOrderStatus?.(order.id, "SHIPPED")}>
+                          {lang === "bn" ? "পাঠানো হয়েছে চিহ্নিত করুন" : "Mark shipped"}
+                        </button>
+                      ) : null}
+                      {order.status === "SHIPPED" ? (
+                        <button type="button" className="button primary" style={{ padding: "6px 14px", fontSize: 13 }} onClick={() => updateOrderStatus?.(order.id, "DELIVERED")}>
+                          {lang === "bn" ? "সরবরাহকৃত চিহ্নিত করুন" : "Mark delivered"}
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : order.status === "PENDING" || !order.status ? (
+                    <div style={{ marginTop: 6, display: "flex", justifyContent: "flex-end" }}>
+                      <button type="button" className="button secondary danger" style={{ padding: "6px 14px", fontSize: 13 }} onClick={() => cancelOrder(order.id)}>
+                        {lang === "bn" ? "অর্ডার বাতিল করুন" : "Cancel order"}
+                      </button>
+                    </div>
+                  ) : null}
+                </article>
+              ))}
+            </div>
+          ) : (
+            <div className="business-empty" style={{ margin: "20px 0" }}>
+              <ShoppingBag />
+              <p>{lang === "bn" ? "আপনার এখনো কোনো পণ্যের অর্ডার নেই।" : "You have not placed any product orders yet."}</p>
+            </div>
+          )}
+        </section>
+      )}
+
+      {cancellingBooking ? (
+        <CancelBookingDialog
+          booking={cancellingBooking}
+          onClose={() => setCancellingBooking(null)}
+          onConfirm={async () => {
+            await handleStatusChange(cancellingBooking, "CANCELLED");
+            setCancellingBooking(null);
+            return true;
+          }}
+        />
+      ) : null}
+
+      {ratingBooking ? (
+        <RatingDialog
+          booking={ratingBooking}
+          onClose={() => setRatingBooking(null)}
+          onSubmit={handleRatingSubmit}
+        />
+      ) : null}
+    </main>
+  );
 }
 
 function ProviderBookings({ provider, notify }) {
@@ -1265,40 +1796,12 @@ function ProviderBookings({ provider, notify }) {
   </section>;
 }
 
-function CancelBookingDialog({ booking, onClose, onConfirm }) {
-  const { lang } = useLanguage();
-  const dialogRef = useRef(null);
-  const [cancelling, setCancelling] = useState(false);
-
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    dialog.showModal();
-    return () => dialog.open && dialog.close();
-  }, []);
-
-  const cancelBooking = async (event) => {
-    event.preventDefault();
-    setCancelling(true);
-    if (await onConfirm()) onClose();
-    else setCancelling(false);
-  };
-
-  return <dialog ref={dialogRef} className="provider-dialog" onCancel={(event) => { event.preventDefault(); onClose(); }} onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-    <form className="modal booking-cancel-modal" onSubmit={cancelBooking} onMouseDown={(event) => event.stopPropagation()} aria-labelledby="cancel-booking-title">
-      <button type="button" className="icon-button close" onClick={onClose} aria-label={lang === "bn" ? "বন্ধ করুন" : "Close"}><X /></button>
-      <p className="eyebrow">{lang === "bn" ? "বুকিং বাতিল" : "Cancel booking"}{/* Cancel booking */}</p>
-      <h2 id="cancel-booking-title">{lang === "bn" ? `${booking.traveler_name}-এর অনুরোধ বাতিল করবেন?` : `Cancel ${booking.traveler_name}'s request?`}</h2>
-      <p>{lang === "bn" ? "ভ্রমণকারী একটি বাতিলকরণ বিজ্ঞপ্তি পাবেন।" : "The traveler will receive a cancellation notification."}</p>
-      <div className="modal-actions"><button type="button" className="button secondary" onClick={onClose}>{lang === "bn" ? "বুকিং রাখুন" : "Keep booking"}</button><button className="button booking-cancel-confirm" disabled={cancelling}>{cancelling ? (lang === "bn" ? "বাতিল হচ্ছে..." : "Cancelling...") : (lang === "bn" ? "অনুরোধ বাতিল করুন" : "Cancel request")}</button></div>
-    </form>
-  </dialog>;
-}
-
-function TravelerDashboard({ user, notify }) {
+function TravelerDashboard({ user, notify, onOpenOrders }) {
   const { lang, toBengaliNumber } = useLanguage();
   const [state, setState] = useState({ loading: true, profile: null, error: "", detailsAvailable: true });
   const [tripCount] = useState(() => loadSavedTrips(user.id).length);
   const [postVersion, setPostVersion] = useState(0);
+  const { totalCount } = useUserOrders(user);
   const fallbackProfile = { full_name: user.user_metadata?.full_name || "", email: user.email, phone: user.user_metadata?.phone || "", phone_visible: false, ...PROFILE_DETAILS_DEFAULTS };
 
   useEffect(() => {
@@ -1312,19 +1815,21 @@ function TravelerDashboard({ user, notify }) {
   if (state.loading) return <main className="page-shell page-top traveler-dashboard"><p>{lang === "bn" ? "ভ্রমণকারী অ্যাকাউন্ট লোড হচ্ছে..." : "Loading your traveler account..."}</p></main>;
   const { profile } = state;
   return <main className="page-shell page-top traveler-dashboard">
-    <div className="page-title dashboard-title"><ProfileAvatar user={user} profile={profile} notify={notify} onSaved={(nextProfile) => setState((current) => ({ ...current, profile: nextProfile }))} /><div><p className="eyebrow">{lang === "bn" ? "হ্যালো," : "Hello,"}</p><h1 className="dashboard-greeting">{profile.full_name || (lang === "bn" ? "ভ্রমণকারী" : "traveler")}</h1><ProfileBio profile={profile} fallback={lang === "bn" ? "আপনার TourismuBD অ্যাকাউন্ট এবং সংরক্ষিত ভ্রমণের পরিকল্পনা।" : "Your TourismuBD account and saved trip plans."} /><DashboardFollowerCount userId={user.id} /></div><div className="dashboard-post-action"><PostPublisher user={user} notify={notify} onPublished={() => setPostVersion((version) => version + 1)} /></div></div>
+    <div className="page-title dashboard-title"><ProfileAvatar user={user} profile={profile} notify={notify} onSaved={(nextProfile) => setState((current) => ({ ...current, profile: nextProfile }))} /><div><p className="eyebrow">{lang === "bn" ? "হ্যালো," : "Hello,"}</p><h1 className="dashboard-greeting">{profile.full_name || (lang === "bn" ? "ভ্রমণকারী" : "traveler")}</h1><ProfileBio profile={profile} fallback={lang === "bn" ? "আপনার TourismuBD অ্যাকাউন্ট এবং সংরক্ষিত ভ্রমণের পরিকল্পনা।" : "Your TourismuBD account and saved trip plans."} /><DashboardFollowerCount userId={user.id} /></div><div className="dashboard-post-action"><button type="button" className="button secondary create-post-button dashboard-order-btn" onClick={onOpenOrders} title={lang === "bn" ? "আমার অর্ডারসমূহ" : "My orders"}><ShoppingBag size={17} /><span>{lang === "bn" ? "আমার অর্ডার" : "My order"}</span>{totalCount ? <span className="owner-menu-booking-count">{toBengaliNumber(totalCount)}</span> : null}</button><PostPublisher user={user} notify={notify} onPublished={() => setPostVersion((version) => version + 1)} /></div></div>
     <section className="provider-dashboard-panel" aria-label={lang === "bn" ? "ভ্রমণকারী অ্যাকাউন্টের বিবরণ" : "Traveler account details"}>
       <div><span>{lang === "bn" ? "সংরক্ষিত ভ্রমণ পরিকল্পনা" : "Saved itineraries"}</span><b>{toBengaliNumber(tripCount)}</b></div>
+      <div><span>{lang === "bn" ? "আমার অর্ডারসমূহ" : "My orders"}</span><b><button type="button" className="link-button" onClick={onOpenOrders} style={{ fontWeight: 700, color: "var(--river-dark)" }}>{toBengaliNumber(totalCount)} {lang === "bn" ? "টি আইটেম" : "items"}</button></b></div>
     </section>
     <ProfilePhotoGallery user={user} profile={profile} notify={notify} onSaved={(nextProfile) => setState((current) => ({ ...current, profile: nextProfile }))} />
     <DashboardPosts user={user} profile={profile} refreshKey={postVersion} notify={notify} />
   </main>;
 }
 
-function BusinessDashboard({ user, notify }) {
-  const { lang } = useLanguage();
+function BusinessDashboard({ user, notify, onOpenOrders }) {
+  const { lang, toBengaliNumber } = useLanguage();
   const [state, setState] = useState({ loading: true, profile: null, business: null, error: "" });
   const [postVersion, setPostVersion] = useState(0);
+  const { totalCount } = useUserOrders(user);
   const fallbackProfile = { full_name: user.user_metadata?.full_name || "", email: user.email, phone: user.user_metadata?.phone || "", phone_visible: false, ...PROFILE_DETAILS_DEFAULTS };
 
   useEffect(() => {
@@ -1343,8 +1848,11 @@ function BusinessDashboard({ user, notify }) {
 
   const { profile, business } = state;
   return <main className="page-shell page-top provider-dashboard business-profile-dashboard">
-    <div className="page-title dashboard-title"><ProfileAvatar user={user} profile={profile} notify={notify} onSaved={(nextProfile) => setState((current) => ({ ...current, profile: nextProfile }))} /><div><p className="eyebrow">{lang === "bn" ? "হ্যালো," : "Hello,"}</p><h1 className="dashboard-greeting">{profile.full_name || (lang === "bn" ? "উদ্যোক্তা" : "business owner")}</h1><ProfileBio profile={profile} fallback={lang === "bn" ? "অ্যাকাউন্ট সেটিংসে আপনার পরিচিতি যোগ করুন।" : "Add your bio in account settings."} /><DashboardFollowerCount userId={user.id} /></div><div className="dashboard-post-action"><PostPublisher user={user} notify={notify} businessPost onPublished={() => setPostVersion((version) => version + 1)} /></div></div>
-    <section className="provider-dashboard-panel" aria-label={lang === "bn" ? "উদ্যোক্তা অ্যাকাউন্টের বিবরণ" : "Business account details"}><div><span>{lang === "bn" ? "ব্যবসা / উদ্যোগ" : "Business"}</span><b>{business?.business_name || (lang === "bn" ? "উদ্যোক্তা অ্যাকাউন্ট" : "Business account")}</b></div></section>
+    <div className="page-title dashboard-title"><ProfileAvatar user={user} profile={profile} notify={notify} onSaved={(nextProfile) => setState((current) => ({ ...current, profile: nextProfile }))} /><div><p className="eyebrow">{lang === "bn" ? "হ্যালো," : "Hello,"}</p><h1 className="dashboard-greeting">{profile.full_name || (lang === "bn" ? "উদ্যোক্তা" : "business owner")}</h1><ProfileBio profile={profile} fallback={lang === "bn" ? "অ্যাকাউন্ট সেটিংসে আপনার পরিচিতি যোগ করুন।" : "Add your bio in account settings."} /><DashboardFollowerCount userId={user.id} /></div><div className="dashboard-post-action"><button type="button" className="button secondary create-post-button dashboard-order-btn" onClick={onOpenOrders} title={lang === "bn" ? "আমার অর্ডারসমূহ" : "My orders"}><ShoppingBag size={17} /><span>{lang === "bn" ? "আমার অর্ডার" : "My order"}</span>{totalCount ? <span className="owner-menu-booking-count">{toBengaliNumber(totalCount)}</span> : null}</button><PostPublisher user={user} notify={notify} businessPost onPublished={() => setPostVersion((version) => version + 1)} /></div></div>
+    <section className="provider-dashboard-panel" aria-label={lang === "bn" ? "উদ্যোক্তা অ্যাকাউন্টের বিবরণ" : "Business account details"}>
+      <div><span>{lang === "bn" ? "ব্যবসা / উদ্যোগ" : "Business"}</span><b>{business?.business_name || (lang === "bn" ? "উদ্যোক্তা অ্যাকাউন্ট" : "Business account")}</b></div>
+      <div><span>{lang === "bn" ? "আমার অর্ডারসমূহ" : "My orders"}</span><b><button type="button" className="link-button" onClick={onOpenOrders} style={{ fontWeight: 700, color: "var(--river-dark)" }}>{toBengaliNumber(totalCount)} {lang === "bn" ? "টি আইটেম" : "items"}</button></b></div>
+    </section>
     <ProfilePhotoGallery user={user} profile={profile} notify={notify} onSaved={(nextProfile) => setState((current) => ({ ...current, profile: nextProfile }))} />
     <DashboardPosts user={user} profile={profile} refreshKey={postVersion} notify={notify} />
   </main>;
@@ -1476,8 +1984,79 @@ function BusinessCatalogPage({ user, notify, onBack }) {
   </main>;
 }
 
-function Marketplace({ query, setQuery }) {
+function PlaceOrderDialog({ product, onClose, onSubmit, user }) {
+  const { lang, toBengaliNumber } = useLanguage();
+  const [quantity, setQuantity] = useState(1);
+  const [loading, setLoading] = useState(false);
+  const price = Number(product.price_bdt) || 0;
+  const total = price * quantity;
+  const maxStock = product.stock_quantity > 0 ? product.stock_quantity : 99;
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    setLoading(true);
+    await onSubmit({
+      product_id: product.id,
+      product_name: product.name,
+      product_price: price,
+      quantity,
+      total_price: total,
+      business_id: product.business_id || product.businesses?.id || null,
+      business_name: product.businesses?.business_name || "",
+      business_district: product.businesses?.district || "",
+      business_contact: product.businesses?.contact_phone || product.businesses?.contact_email || "",
+      delivery_address: data.get("address"),
+      contact_phone: data.get("phone"),
+      note: data.get("note") || "",
+      image_url: product.image_url || "",
+    });
+    setLoading(false);
+  };
+
+  return (
+    <dialog open className="provider-dialog" onClose={onClose}>
+      <form className="modal" onSubmit={handleSubmit}>
+        <button className="icon-button close" type="button" onClick={onClose} aria-label="Close"><X /></button>
+        <p className="eyebrow">{product.businesses?.business_name || (lang === "bn" ? "অর্ডার" : "Order")}</p>
+        <h2>{lang === "bn" ? "অর্ডার ফর্ম" : "Place your order"}</h2>
+        <div style={{ marginBottom: 16 }}>
+          <b>{product.name}</b>
+          <p style={{ margin: "4px 0", color: "var(--muted)", fontSize: 14 }}>{product.description}</p>
+          <p style={{ margin: "6px 0 0", fontWeight: 700, color: "var(--river-dark)" }}>৳{lang === "bn" ? toBengaliNumber(price.toLocaleString()) : price.toLocaleString()} / unit</p>
+        </div>
+        <label>
+          {lang === "bn" ? "পরিমাণ" : "Quantity"}
+          <input type="number" min="1" max={maxStock} value={quantity} onChange={(e) => setQuantity(Math.max(1, Math.min(maxStock, Number(e.target.value) || 1)))} required />
+        </label>
+        <div style={{ margin: "10px 0 16px", padding: "10px 14px", background: "var(--paper)", borderRadius: 6, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span>{lang === "bn" ? "মোট মূল্য" : "Total Price"}:</span>
+          <b style={{ fontSize: 18, color: "var(--river-dark)" }}>৳{lang === "bn" ? toBengaliNumber(total.toLocaleString()) : total.toLocaleString()}</b>
+        </div>
+        <label>
+          {lang === "bn" ? "ডেলিভারি ঠিকানা" : "Delivery address"}
+          <textarea name="address" rows="3" required placeholder={lang === "bn" ? "আপনার বিস্তারিত ঠিকানা লিখুন..." : "Enter your full delivery address..."} />
+        </label>
+        <label>
+          {lang === "bn" ? "যোগাযোগের ফোন নম্বর" : "Contact phone number"}
+          <input name="phone" type="tel" required defaultValue={user?.user_metadata?.phone || ""} placeholder="01XXXXXXXXX" />
+        </label>
+        <label>
+          {lang === "bn" ? "বিশেষ দ্রষ্টব্য (ঐচ্ছিক)" : "Note (optional)"}
+          <input name="note" placeholder={lang === "bn" ? "ডেলিভারি সংক্রান্ত নির্দেশনা..." : "Any delivery instructions..."} />
+        </label>
+        <button type="submit" className="button primary wide" disabled={loading}>
+          {loading ? (lang === "bn" ? "অর্ডার পাঠানো হচ্ছে..." : "Placing order...") : (lang === "bn" ? "অর্ডার নিশ্চিত করুন" : "Confirm order")}
+        </button>
+      </form>
+    </dialog>
+  );
+}
+
+function Marketplace({ query, setQuery, user, onAuth, notify }) {
   const [state, setState] = useState({ loading: true, products: [], error: "", postError: "" });
+  const { refreshOrders } = useUserOrders(user);
+  const [orderingProduct, setOrderingProduct] = useState(null);
 
   useEffect(() => {
     let active = true;
@@ -1517,19 +2096,59 @@ function Marketplace({ query, setQuery }) {
     return () => { active = false; };
   }, []);
 
+  const handlePlaceOrder = async (orderPayload) => {
+    if (!user) {
+      notify?.(lang === "bn" ? "অর্ডার করতে সাইন ইন করুন।" : "Please sign in to place an order.");
+      onAuth?.();
+      return;
+    }
+    const orderData = {
+      ...orderPayload,
+      id: `ord-${Date.now()}`,
+      user_id: user.id,
+      status: "PENDING",
+      createdAt: new Date().toISOString(),
+      created_at: new Date().toISOString(),
+    };
+    saveUserOrder(orderData, user.id);
+    if (supabase) {
+      try {
+        await supabase.from("product_orders").insert({
+          user_id: user.id,
+          product_id: orderPayload.product_id,
+          product_name: orderPayload.product_name,
+          product_price: orderPayload.product_price,
+          quantity: orderPayload.quantity,
+          total_price: orderPayload.total_price,
+          business_id: orderPayload.business_id,
+          delivery_address: orderPayload.delivery_address,
+          contact_phone: orderPayload.contact_phone,
+          note: orderPayload.note,
+          status: "PENDING"
+        });
+      } catch {}
+    }
+    setOrderingProduct(null);
+    refreshOrders();
+    notify?.(lang === "bn" ? "আপনার অর্ডার সফলভাবে পাঠানো হয়েছে। ড্যাশবোর্ড থেকে অর্ডারটি দেখতে পারেন।" : "Your order has been placed successfully. You can view it from your dashboard.");
+  };
+
   const { lang, translateDistrict, toBengaliNumber } = useLanguage();
   const products = searchShopProducts(state.products, query);
   return <main className="page-shell page-top marketplace-page">
     <div className="page-title"><p className="eyebrow">{lang === "bn" ? "মার্কেটপ্লেস" : "TourismuBD marketplace"}</p><h1>{lang === "bn" ? "স্থানীয় উদ্যোগ থেকে কেনাকাটা করুন।" : "Shop from local businesses."}</h1><p>{lang === "bn" ? "বাংলাদেশের স্থানীয় উদ্যোক্তা ও ব্যবসার পণ্য ঘুরে দেখুন।" : "Browse products offered by business accounts across Bangladesh."}</p></div>
-    <label className="inline-search marketplace-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={lang === "bn" ? "পণ্য, ব্যবসা বা জেলা দিয়ে অনুসন্ধান..." : "Search products, businesses, or districts"} /><span>{toBengaliNumber(products.length)} {lang === "bn" ? "টি পণ্য" : "products"}</span></label>
+    <div className="marketplace-controls">
+      <label className="inline-search marketplace-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={lang === "bn" ? "পণ্য, ব্যবসা বা জেলা দিয়ে অনুসন্ধান..." : "Search products, businesses, or districts"} /><span>{toBengaliNumber(products.length)} {lang === "bn" ? "টি পণ্য" : "products"}</span></label>
+    </div>
     {state.loading ? <p>{lang === "bn" ? "পণ্য লোড হচ্ছে..." : "Loading products..."}</p> : null}
     {state.error ? <p className="form-error">{state.error}</p> : null}
     {state.postError ? <p className="form-note">{state.postError}</p> : null}
     {!state.loading && !state.error && !products.length ? <div className="business-empty"><ShoppingBag /><p>{lang === "bn" ? "অনুসন্ধানের সাথে কোনো পণ্য মেলেনি।" : "No products match your search yet."}</p></div> : null}
     <div className="marketplace-grid">{products.map((product) => <article className="marketplace-card" key={`${product.kind}-${product.id}`}>
       <div className="marketplace-media">{product.media_type === "VIDEO" ? <video controls preload="metadata" src={product.image_url} aria-label={product.name} /> : product.image_url ? <img src={product.image_url} alt={product.name} /> : <Package />}</div>
-      <div className="marketplace-copy"><p className="eyebrow">{product.businesses?.business_name}</p><h2>{product.name}</h2><p>{product.description || (lang === "bn" ? "পণ্যের বিবরণ বিক্রেতার কাছে থেকে পাওয়া যাবে।" : "Product details are available from the seller.")}</p><div className="marketplace-price">{product.kind === "POST" ? <b className="marketplace-post-label">{lang === "bn" ? "পণ্য পোস্ট" : "Product post"}</b> : <><b>৳{lang === "bn" ? toBengaliNumber(Number(product.price_bdt).toLocaleString("en-US")) : Number(product.price_bdt).toLocaleString()}</b><span>{product.stock_quantity > 0 ? (lang === "bn" ? `${toBengaliNumber(product.stock_quantity)}টি উপলব্ধ` : `${product.stock_quantity} available`) : (lang === "bn" ? "স্টক শেষ" : "Out of stock")}</span></>}</div><div className="marketplace-seller"><span>{translateDistrict(product.businesses?.district) || (lang === "bn" ? "বাংলাদেশ" : "Bangladesh")}</span>{product.businesses?.contact_phone ? <a href={`tel:${product.businesses.contact_phone}`}>{product.businesses.contact_phone}</a> : product.businesses?.contact_email ? <a href={`mailto:${product.businesses.contact_email}`}>{lang === "bn" ? "যোগাযোগ করুন" : "Contact seller"}</a> : null}</div></div>
+      <div className="marketplace-copy"><p className="eyebrow">{product.businesses?.business_name}</p><h2>{product.name}</h2><p>{product.description || (lang === "bn" ? "পণ্যের বিবরণ বিক্রেতার কাছে থেকে পাওয়া যাবে।" : "Product details are available from the seller.")}</p><div className="marketplace-price">{product.kind === "POST" ? <b className="marketplace-post-label">{lang === "bn" ? "পণ্য পোস্ট" : "Product post"}</b> : <><b>৳{lang === "bn" ? toBengaliNumber(Number(product.price_bdt).toLocaleString("en-US")) : Number(product.price_bdt).toLocaleString()}</b><span>{product.stock_quantity > 0 ? (lang === "bn" ? `${toBengaliNumber(product.stock_quantity)}টি উপলব্ধ` : `${product.stock_quantity} available`) : (lang === "bn" ? "স্টক শেষ" : "Out of stock")}</span></>}</div><div className="marketplace-seller"><span>{translateDistrict(product.businesses?.district) || (lang === "bn" ? "বাংলাদেশ" : "Bangladesh")}</span>{product.businesses?.contact_phone ? <a href={`tel:${product.businesses.contact_phone}`}>{product.businesses.contact_phone}</a> : product.businesses?.contact_email ? <a href={`mailto:${product.businesses.contact_email}`}>{lang === "bn" ? "যোগাযোগ করুন" : "Contact seller"}</a> : null}</div>{product.kind === "LISTING" ? <div className="marketplace-card-action"><button type="button" className="button primary marketplace-order-btn" onClick={() => user ? setOrderingProduct(product) : onAuth()}><ShoppingBag size={15} />{lang === "bn" ? "অর্ডার করুন" : "Order now"}</button></div> : null}</div>
     </article>)}</div>
+    {orderingProduct ? <PlaceOrderDialog product={orderingProduct} user={user} onClose={() => setOrderingProduct(null)} onSubmit={handlePlaceOrder} /> : null}
   </main>;
 }
 
@@ -1581,7 +2200,10 @@ function TravelerRatings({ user, notify }) {
   }, [user.id, refreshKey, lang]);
 
   const submitRating = async (booking, rating) => {
-    const { error } = await supabase.from("reviews").insert({ booking_id: booking.id, rating });
+    if (booking.status === "CONFIRMED") {
+      await supabase.from("bookings").update({ status: "COMPLETED" }).eq("id", booking.id);
+    }
+    const { error } = await supabase.from("reviews").insert({ booking_id: booking.id, traveler_id: user.id, rating });
     if (error) {
       if (error.code === "23505") {
         setRefreshKey((value) => value + 1);
@@ -1596,11 +2218,13 @@ function TravelerRatings({ user, notify }) {
     return true;
   };
 
-  if (!state.loading && !state.error && !state.bookings.length) return null;
   return <section className="traveler-ratings" aria-labelledby="traveler-ratings-title">
     <div className="provider-bookings-heading"><div><p className="eyebrow">{lang === "bn" ? "সম্পন্ন বুকিং" : "Completed bookings"}{/* Completed bookings */}</p><h2 id="traveler-ratings-title">{lang === "bn" ? "আপনার প্রোভাইডার রেটিং" : "Your provider ratings"}{/* Your provider ratings */}</h2></div></div>
     {state.loading ? <p className="form-note">{lang === "bn" ? "সম্পন্ন বুকিং লোড হচ্ছে..." : "Loading completed bookings..."}</p> : null}
     {state.error ? <p className="form-error">{state.error}</p> : null}
+    {!state.loading && !state.error && !state.bookings.length ? (
+      <p className="booking-empty">{lang === "bn" ? "রেটিং দেওয়ার মতো কোনো সম্পন্ন ট্যুর বা বুকিং নেই।" : "No completed bookings pending rating."}</p>
+    ) : null}
     <div className="booking-list">{state.bookings.map((booking) => <article className="booking-card" key={booking.id}><div><p className="eyebrow">{SERVICE_META[booking.service_type]?.label || booking.service_type}</p><h3>{booking.provider_name}</h3><p>{lang === "bn" ? `সম্পন্ন ${new Date(booking.completed_at).toLocaleDateString("bn-BD", { day: "numeric", month: "short", year: "numeric" })}` : `Completed ${new Date(booking.completed_at).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}`}</p></div><div className="booking-card-action">{booking.rating ? <p className="traveler-rating"><Star /><b>{toBengaliNumber(booking.rating)}.0</b><span>{lang === "bn" ? "আপনার রেটিং" : "Your rating"}{/* Your rating */}</span></p> : <button type="button" className="button primary" onClick={() => setRatingBooking(booking)}><Star />{lang === "bn" ? "রেটিং দিন" : "Rate provider"}{/* Rate provider */}</button>}</div></article>)}</div>
     {ratingBooking ? <RatingDialog booking={ratingBooking} onClose={() => setRatingBooking(null)} onSubmit={submitRating} /> : null}
   </section>;
@@ -1609,38 +2233,6 @@ function TravelerRatings({ user, notify }) {
 function TravelerRatingsPage({ user, notify, onBack }) {
   const { lang } = useLanguage();
   return <main className="page-shell page-top traveler-ratings-page"><button type="button" className="back-button" onClick={onBack}><ArrowLeft />{lang === "bn" ? "অ্যাকাউন্টে ফিরে যান" : "Back to account"}</button><TravelerRatings user={user} notify={notify} /></main>;
-}
-
-function RatingDialog({ booking, onClose, onSubmit }) {
-  const { lang } = useLanguage();
-  const dialogRef = useRef(null);
-  const [rating, setRating] = useState(0);
-  const [submitting, setSubmitting] = useState(false);
-
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    dialog.showModal();
-    return () => dialog.open && dialog.close();
-  }, []);
-
-  const submit = async (event) => {
-    event.preventDefault();
-    if (!rating) return;
-    setSubmitting(true);
-    if (await onSubmit(booking, rating)) onClose();
-    else setSubmitting(false);
-  };
-
-  return <dialog ref={dialogRef} className="provider-dialog" onCancel={(event) => { event.preventDefault(); onClose(); }} onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-    <form className="modal rating-modal" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()} aria-labelledby="rating-title">
-      <button type="button" className="icon-button close" onClick={onClose} aria-label={lang === "bn" ? "বন্ধ করুন" : "Close"}><X /></button>
-      <p className="eyebrow">{lang === "bn" ? "সম্পন্ন বুকিং" : "Completed booking"}</p>
-      <h2 id="rating-title">{lang === "bn" ? `${booking.provider_name}-কে রেটিং দিন` : `Rate ${booking.provider_name}`}</h2>
-      <p>{lang === "bn" ? "আপনার অভিজ্ঞতা কেমন ছিল? আপনার দেওয়া রেটিং এই প্রোভাইডারের পাবলিক প্রোফাইলে প্রদর্শিত হবে।" : "How was your experience? Your rating will be visible on this provider's public profile."}</p>
-      <div className="rating-picker" role="group" aria-label="Choose a rating from 1 to 5 stars">{[1, 2, 3, 4, 5].map((value) => <button type="button" key={value} className={rating >= value ? "active" : ""} onClick={() => setRating(value)} aria-label={`${value} star${value === 1 ? "" : "s"}`} aria-pressed={rating === value}><Star /></button>)}</div>
-      <div className="modal-actions"><button type="button" className="button secondary" onClick={onClose}>{lang === "bn" ? "এখন নয়" : "Not now"}</button><button className="button primary" disabled={!rating || submitting}>{submitting ? (lang === "bn" ? "জমা হচ্ছে..." : "Submitting...") : (lang === "bn" ? "রেটিং জমা দিন" : "Submit rating")}</button></div>
-    </form>
-  </dialog>;
 }
 
 function MessageDialog({ user, recipient, onClose, notify, onSent }) {
@@ -1855,14 +2447,14 @@ function Logo({ compact = false }) {
   );
 }
 
-function BookingNotifications({ user }) {
+function BookingNotifications({ user, onOpenBookings, onOpenRatings }) {
   const { lang, toBengaliNumber } = useLanguage();
   const [items, setItems] = useState([]);
   const [open, setOpen] = useState(false);
   const menuRef = useRef(null);
 
   const load = async () => {
-    const { data } = await supabase.from("notifications").select("id,message,read_at,created_at").eq("recipient_id", user.id).order("created_at", { ascending: false }).limit(10);
+    const { data } = await supabase.from("notifications").select("id,kind,message,read_at,created_at").eq("recipient_id", user.id).order("created_at", { ascending: false }).limit(10);
     if (data) setItems(data);
   };
 
@@ -1889,11 +2481,26 @@ function BookingNotifications({ user }) {
   }, [open]);
 
   const markRead = async (item) => {
-    if (item.read_at) return;
-    const readAt = new Date().toISOString();
-    setItems((current) => current.map((notification) => notification.id === item.id ? { ...notification, read_at: readAt } : notification));
-    const { error } = await supabase.from("notifications").update({ read_at: readAt }).eq("id", item.id);
-    if (error) load();
+    if (!item.read_at) {
+      const readAt = new Date().toISOString();
+      setItems((current) => current.map((notification) => notification.id === item.id ? { ...notification, read_at: readAt } : notification));
+      const { error } = await supabase.from("notifications").update({ read_at: readAt }).eq("id", item.id);
+      if (error) load();
+    }
+    if (item.kind === "BOOKING_REQUESTED" && onOpenBookings) {
+      setOpen(false);
+      onOpenBookings();
+    } else if (item.kind === "BOOKING_CONFIRMED" && onOpenBookings) {
+      setOpen(false);
+      onOpenBookings();
+    } else if (item.kind === "BOOKING_COMPLETED") {
+      setOpen(false);
+      if (onOpenBookings) onOpenBookings();
+      else if (onOpenRatings) onOpenRatings();
+    } else if (onOpenBookings) {
+      setOpen(false);
+      onOpenBookings();
+    }
   };
 
   const unread = items.filter((item) => !item.read_at).length;
@@ -1933,7 +2540,7 @@ function Header({ view, setView, tripCount, user, onAuth, onDeactivate, onSignOu
           </button>
         ))}
         <button className="account-link" onClick={onAuth}><CircleUserRound size={17} />{user ? t("nav.account") : t("nav.signIn")}</button>
-        {user ? <BookingNotifications user={user} /> : null}
+        {user ? <BookingNotifications user={user} onOpenBookings={onOpenBookings} onOpenRatings={onOpenRatings} /> : null}
         {user ? <OwnerMenu user={user} onDeactivate={onDeactivate} onSignOut={onSignOut} onOpenAbout={onOpenAbout} onOpenBookings={onOpenBookings} onOpenRatings={onOpenRatings} onOpenMessages={onOpenMessages} onOpenBusinessCatalog={onOpenBusinessCatalog} notify={notify} className="header-owner-menu" theme={theme} onThemeChange={onThemeChange} /> : null}
       </nav>
       <div className="header-actions">
@@ -3314,11 +3921,11 @@ export default function App() {
         {!protectedView && view === "services" ? <Services notify={notify} type={serviceType} onTypeChange={setServiceType} user={auth.user} onAuth={() => requestAuthentication()} district={serviceDistrict} /> : null}
         {!protectedView && view === "people" ? <PeopleDirectory notify={notify} user={auth.user} query={peopleQuery} setQuery={setPeopleQuery} /> : null}
         {!protectedView && view === "feed" ? <CommunityFeed user={auth.user} notify={notify} /> : null}
-        {!protectedView && view === "shop" ? <Marketplace query={marketplaceQuery} setQuery={setMarketplaceQuery} /> : null}
-        {view === "provider" && auth.user ? <ProviderDashboard user={auth.user} notify={notify} /> : null}
-        {view === "booking-requests" && auth.user ? <ProviderBookingRequestsPage user={auth.user} notify={notify} onBack={() => showView("provider")} /> : null}
-        {view === "traveler" && auth.user ? <TravelerDashboard user={auth.user} notify={notify} /> : null}
-        {view === "business" && auth.user ? <BusinessDashboard user={auth.user} notify={notify} /> : null}
+        {!protectedView && view === "shop" ? <Marketplace query={marketplaceQuery} setQuery={setMarketplaceQuery} user={auth.user} onAuth={() => requestAuthentication()} notify={notify} /> : null}
+        {view === "provider" && auth.user ? <ProviderDashboard user={auth.user} notify={notify} onOpenOrders={() => navigate("booking-requests")} /> : null}
+        {view === "booking-requests" && auth.user ? <ProviderBookingRequestsPage user={auth.user} notify={notify} onBack={openDashboard} /> : null}
+        {view === "traveler" && auth.user ? <TravelerDashboard user={auth.user} notify={notify} onOpenOrders={() => navigate("booking-requests")} /> : null}
+        {view === "business" && auth.user ? <BusinessDashboard user={auth.user} notify={notify} onOpenOrders={() => navigate("booking-requests")} /> : null}
         {view === "business-catalog" && auth.user ? <BusinessCatalogPage user={auth.user} notify={notify} onBack={() => navigate("business")} /> : null}
         {view === "account-about" && auth.user ? <AccountAboutPage user={auth.user} notify={notify} onBack={openDashboard} /> : null}
         {view === "provider-ratings" && auth.user ? <TravelerRatingsPage user={auth.user} notify={notify} onBack={() => showView("traveler")} /> : null}
