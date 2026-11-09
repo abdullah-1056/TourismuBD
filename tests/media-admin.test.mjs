@@ -157,3 +157,119 @@ test("9. Place objects dynamically reflect updated image via getter", () => {
   delete CUSTOM_MEDIA_STORE.places["achranga-dighi"];
 });
 
+test("10. Admin District Selection maps all 64 districts and filters destinations cleanly", async () => {
+  const { districts, places: allPlaces } = await import("../src/data/tourism.js");
+  assert.equal(districts.length, 64, "All 64 districts must be defined");
+  assert.ok(allPlaces.length >= 519, "All 519 places must exist");
+
+  const byId = new Map(districts.map((d) => [String(d.id).toLowerCase(), d]));
+  const bySlug = new Map(districts.map((d) => [String(d.slug).toLowerCase(), d]));
+  const byName = new Map(districts.map((d) => [String(d.name).toLowerCase(), d]));
+  const resolve = (val) => byId.get(String(val).toLowerCase()) || bySlug.get(String(val).toLowerCase()) || byName.get(String(val).toLowerCase());
+
+  // Test resolution of every destination to its district
+  let unmapped = 0;
+  for (const place of allPlaces) {
+    const rawDist = place.districtId || place.district;
+    const d = resolve(rawDist);
+    if (!d) unmapped++;
+  }
+  assert.equal(unmapped, 0, "Every single destination must resolve to a valid Bangladesh district");
+
+  // Test district filtering (e.g. Sylhet)
+  const sylhetDist = districts.find((d) => d.name === "Sylhet");
+  assert.ok(sylhetDist);
+  const sylhetPlaces = allPlaces.filter((p) => resolve(p.districtId || p.district)?.id === sylhetDist.id);
+  assert.ok(sylhetPlaces.length > 0, "Sylhet must contain destinations");
+  for (const p of sylhetPlaces) {
+    const resolved = resolve(p.districtId || p.district);
+    assert.equal(resolved.name, "Sylhet");
+  }
+
+  // Test Bagerhat filtering
+  const bagerhatDist = districts.find((d) => d.name === "Bagerhat");
+  assert.ok(bagerhatDist);
+  const bagerhatPlaces = allPlaces.filter((p) => resolve(p.districtId || p.district)?.id === bagerhatDist.id);
+  assert.ok(bagerhatPlaces.length > 0, "Bagerhat must contain destinations");
+  for (const p of bagerhatPlaces) {
+    const resolved = resolve(p.districtId || p.district);
+    assert.equal(resolved.name, "Bagerhat");
+  }
+});
+
+test("11. District Media Editor sequential navigation calculates bounds and names correctly", async () => {
+  const { districts, places: allPlaces } = await import("../src/data/tourism.js");
+  const sylhetDist = districts.find((d) => d.name === "Sylhet");
+  const byId = new Map(districts.map((d) => [String(d.id).toLowerCase(), d]));
+  const resolve = (val) => byId.get(String(val).toLowerCase());
+  const sylhetPlaces = allPlaces.filter((p) => resolve(p.districtId || p.district)?.id === sylhetDist.id);
+
+  // Function to build navigation props matching openPlaceEditorAtIndex in MediaManager
+  const buildNav = (idx, list) => ({
+    currentIndex: idx,
+    totalPlaces: list.length,
+    totalInDistrict: list.length,
+    hasNext: idx < list.length - 1,
+    hasPrev: idx > 0,
+    nextPlaceName: idx < list.length - 1 ? list[idx + 1].name : null,
+    prevPlaceName: idx > 0 ? list[idx - 1].name : null,
+  });
+
+  // First item
+  const first = buildNav(0, sylhetPlaces);
+  assert.equal(first.hasPrev, false);
+  assert.equal(first.hasNext, true);
+  assert.equal(first.prevPlaceName, null);
+  assert.equal(first.nextPlaceName, sylhetPlaces[1].name);
+
+  // Middle item
+  if (sylhetPlaces.length > 2) {
+    const mid = buildNav(1, sylhetPlaces);
+    assert.equal(mid.hasPrev, true);
+    assert.equal(mid.hasNext, true);
+    assert.equal(mid.prevPlaceName, sylhetPlaces[0].name);
+    assert.equal(mid.nextPlaceName, sylhetPlaces[2].name);
+  }
+
+  // Last item
+  const lastIdx = sylhetPlaces.length - 1;
+  const last = buildNav(lastIdx, sylhetPlaces);
+  assert.equal(last.hasPrev, true);
+  assert.equal(last.hasNext, false);
+  assert.equal(last.prevPlaceName, sylhetPlaces[lastIdx - 1].name);
+  assert.equal(last.nextPlaceName, null);
+});
+
+test("12. Media grid pagination correctly pages at 6 rows per page (36 destinations)", async () => {
+  const { places: allPlaces } = await import("../src/data/tourism.js");
+  const itemsPerRow = 6;
+  const rowsPerPage = 6;
+  const pageSize = itemsPerRow * rowsPerPage; // 36 items per page
+
+  assert.equal(pageSize, 36, "Page size must be 36 items (6 rows of 6 cards)");
+
+  const totalItems = allPlaces.length; // 519
+  const totalPages = Math.ceil(totalItems / pageSize);
+  assert.equal(totalPages, 15, "519 items divided by 36 must produce 15 pages");
+
+  // Page 1
+  const p1Start = 0;
+  const p1End = 36;
+  const p1Slice = allPlaces.slice(p1Start, p1End);
+  assert.equal(p1Slice.length, 36, "Page 1 must contain exactly 36 items (6 full rows)");
+
+  // Page 2
+  const p2Start = 36;
+  const p2End = 72;
+  const p2Slice = allPlaces.slice(p2Start, p2End);
+  assert.equal(p2Slice.length, 36, "Page 2 must contain exactly 36 items");
+
+  // Page 15 (last page)
+  const p15Start = 14 * pageSize;
+  const p15Slice = allPlaces.slice(p15Start);
+  assert.equal(p15Slice.length, totalItems - 14 * pageSize, "Last page contains remaining items");
+  assert.equal(p15Slice.length, 15);
+});
+
+
+

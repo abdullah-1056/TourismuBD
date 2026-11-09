@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import {
@@ -66,7 +66,7 @@ import {
 } from "./data/tourism.js";
 import { formatRoadRouteStatus, loadRoadRoute, resolveRouteWaypoints, ROUTE_OUTSIDE_BANGLADESH, routeStaysInsideBangladesh } from "./lib/road-map.js";
 import { findNearbyPlaces, maxTripDaysForPlaceCount, planDailyRoute, planDistrictTour, planRoute } from "./lib/route.js";
-import { loadSavedTrips, saveTrip, loadUserOrders, saveUserOrder, cancelUserOrder } from "./lib/storage.js";
+import { loadSavedTrips, saveTrip, loadUserOrders, saveUserOrder, cancelUserOrder, loadSeenOrderIds, saveSeenOrderIds } from "./lib/storage.js";
 import { combineShopProducts, searchShopProducts } from "./lib/shop.js";
 import { supabase } from "./lib/supabase.js";
 import { usePublishedTourism } from "./lib/tourism-content.js";
@@ -1242,12 +1242,14 @@ function useUserOrders(user) {
   const [travelerBookings, setTravelerBookings] = useState([]);
   const [loading, setLoading] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [seenIds, setSeenIds] = useState(() => (user?.id ? loadSeenOrderIds(user.id) : null));
 
   useEffect(() => {
     if (!user?.id) {
       setOrders([]);
       setProviderBookings([]);
       setTravelerBookings([]);
+      setSeenIds(null);
       return;
     }
     let active = true;
@@ -1289,6 +1291,31 @@ function useUserOrders(user) {
       active = false;
     };
   }, [user?.id, refreshKey]);
+
+  const allItemIds = useMemo(() => [
+    ...providerBookings.map((b) => b.id),
+    ...travelerBookings.map((b) => b.id),
+    ...orders.map((o) => o.id),
+  ].filter(Boolean), [providerBookings, travelerBookings, orders]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    if (seenIds === null && allItemIds.length > 0) {
+      saveSeenOrderIds(user.id, allItemIds);
+      setSeenIds(new Set(allItemIds));
+    }
+  }, [user?.id, seenIds, allItemIds]);
+
+  const markOrdersSeen = useCallback(() => {
+    if (!user?.id) return;
+    const currentIds = [
+      ...providerBookings.map((b) => b.id),
+      ...travelerBookings.map((b) => b.id),
+      ...orders.map((o) => o.id),
+    ].filter(Boolean);
+    saveSeenOrderIds(user.id, currentIds);
+    setSeenIds(new Set(currentIds));
+  }, [user?.id, providerBookings, travelerBookings, orders]);
 
   const cancelOrder = async (orderId) => {
     cancelUserOrder(orderId, user?.id);
@@ -1333,11 +1360,13 @@ function useUserOrders(user) {
     return { error };
   };
 
-  const totalCount = (providerBookings.length || travelerBookings.length) + orders.length;
+  const totalCount = providerBookings.length + travelerBookings.length + orders.length;
   const pendingCount =
     providerBookings.filter((b) => b.status === "PENDING").length +
     travelerBookings.filter((b) => b.status === "PENDING").length +
     orders.filter((o) => (o.status || "PENDING") === "PENDING").length;
+
+  const unseenCount = seenIds === null ? 0 : allItemIds.filter((id) => !seenIds.has(id)).length;
 
   return {
     orders,
@@ -1345,6 +1374,8 @@ function useUserOrders(user) {
     travelerBookings,
     totalCount,
     pendingCount,
+    unseenCount,
+    markOrdersSeen,
     loading,
     cancelOrder,
     updateOrderStatus,
@@ -1360,7 +1391,7 @@ function ProviderDashboard({ user, notify, onOpenOrders }) {
   const { lang, toBengaliNumber } = useLanguage();
   const [state, setState] = useState({ loading: true, profile: null, provider: null, rating: null, error: "", detailsAvailable: true });
   const [postVersion, setPostVersion] = useState(0);
-  const { totalCount } = useUserOrders(user);
+  const { totalCount, unseenCount, markOrdersSeen } = useUserOrders(user);
 
   useEffect(() => {
     let active = true;
@@ -1380,7 +1411,7 @@ function ProviderDashboard({ user, notify, onOpenOrders }) {
 
   const { profile, provider, rating } = state;
   return <main className="page-shell page-top provider-dashboard">
-    <div className="page-title dashboard-title"><ProfileAvatar user={user} profile={profile || {}} provider={provider} notify={notify} onSaved={(nextProfile) => setState((current) => ({ ...current, profile: nextProfile }))} /><div><p className="eyebrow">{lang === "bn" ? "হ্যালো," : "Hello,"}</p><h1 className="dashboard-greeting">{profile?.full_name || provider?.display_name || (lang === "bn" ? "সেবা প্রদানকারী" : "provider")}</h1><ProviderRating profile={rating || {}} /><ProfileBio profile={{ ...profile, bio: profile?.bio || provider?.bio }} fallback={lang === "bn" ? "নিচে আপনার পরিচিতি যোগ করুন।" : "Add your bio below."} /><DashboardFollowerCount userId={user.id} /></div><div className="dashboard-post-action"><button type="button" className="button secondary create-post-button dashboard-order-btn" onClick={onOpenOrders} title={lang === "bn" ? "আমার অর্ডারসমূহ" : "My orders"}><ShoppingBag size={17} /><span>{lang === "bn" ? "আমার অর্ডার" : "My order"}</span>{totalCount ? <span className="owner-menu-booking-count">{toBengaliNumber(totalCount)}</span> : null}</button><PostPublisher user={user} notify={notify} onPublished={() => setPostVersion((version) => version + 1)} /></div></div>
+    <div className="page-title dashboard-title"><ProfileAvatar user={user} profile={profile || {}} provider={provider} notify={notify} onSaved={(nextProfile) => setState((current) => ({ ...current, profile: nextProfile }))} /><div><p className="eyebrow">{lang === "bn" ? "হ্যালো," : "Hello,"}</p><h1 className="dashboard-greeting">{profile?.full_name || provider?.display_name || (lang === "bn" ? "সেবা প্রদানকারী" : "provider")}</h1><ProviderRating profile={rating || {}} /><ProfileBio profile={{ ...profile, bio: profile?.bio || provider?.bio }} fallback={lang === "bn" ? "নিচে আপনার পরিচিতি যোগ করুন।" : "Add your bio below."} /><DashboardFollowerCount userId={user.id} /></div><div className="dashboard-post-action"><button type="button" className="button secondary create-post-button dashboard-order-btn" onClick={() => { markOrdersSeen(); onOpenOrders?.(); }} title={lang === "bn" ? "আমার অর্ডারসমূহ" : "My orders"}><ShoppingBag size={17} /><span>{lang === "bn" ? "আমার অর্ডার" : "My order"}</span>{unseenCount ? <span className="owner-menu-booking-count">{toBengaliNumber(unseenCount)}</span> : null}</button><PostPublisher user={user} notify={notify} onPublished={() => setPostVersion((version) => version + 1)} /></div></div>
     {provider ? <section className="provider-dashboard-panel" aria-label={lang === "bn" ? "প্রোভাইডার অ্যাকাউন্টের বিবরণ" : "Provider account details"}>
       <div><span>{lang === "bn" ? "সেবার ধরন" : "Provider type"}</span><b>{lang === "bn" ? (PROVIDER_ROLE_LABELS_BN[profile?.role] || provider.type) : (PROVIDER_TYPE_LABELS[profile?.role] || provider.type)}</b></div>
       <div><span>{lang === "bn" ? "সার্ভিসের নাম" : "Service name"}</span>{/* Service name */}<b>{provider.service_name || (lang === "bn" ? "যুক্ত করা হয়নি" : "Not added")}</b></div>
@@ -1401,7 +1432,12 @@ function ProviderBookingRequestsPage({ user, notify, onBack }) {
     updateOrderStatus,
     updateBookingStatus,
     submitBookingRating,
+    markOrdersSeen,
   } = useUserOrders(user);
+
+  useEffect(() => {
+    markOrdersSeen();
+  }, [markOrdersSeen]);
 
   const bookingsCount = (providerBookings?.length || 0) + (travelerBookings?.length || 0);
   const productsCount = orders?.length || 0;
@@ -1801,7 +1837,7 @@ function TravelerDashboard({ user, notify, onOpenOrders }) {
   const [state, setState] = useState({ loading: true, profile: null, error: "", detailsAvailable: true });
   const [tripCount] = useState(() => loadSavedTrips(user.id).length);
   const [postVersion, setPostVersion] = useState(0);
-  const { totalCount } = useUserOrders(user);
+  const { totalCount, unseenCount, markOrdersSeen } = useUserOrders(user);
   const fallbackProfile = { full_name: user.user_metadata?.full_name || "", email: user.email, phone: user.user_metadata?.phone || "", phone_visible: false, ...PROFILE_DETAILS_DEFAULTS };
 
   useEffect(() => {
@@ -1815,10 +1851,10 @@ function TravelerDashboard({ user, notify, onOpenOrders }) {
   if (state.loading) return <main className="page-shell page-top traveler-dashboard"><p>{lang === "bn" ? "ভ্রমণকারী অ্যাকাউন্ট লোড হচ্ছে..." : "Loading your traveler account..."}</p></main>;
   const { profile } = state;
   return <main className="page-shell page-top traveler-dashboard">
-    <div className="page-title dashboard-title"><ProfileAvatar user={user} profile={profile} notify={notify} onSaved={(nextProfile) => setState((current) => ({ ...current, profile: nextProfile }))} /><div><p className="eyebrow">{lang === "bn" ? "হ্যালো," : "Hello,"}</p><h1 className="dashboard-greeting">{profile.full_name || (lang === "bn" ? "ভ্রমণকারী" : "traveler")}</h1><ProfileBio profile={profile} fallback={lang === "bn" ? "আপনার TourismuBD অ্যাকাউন্ট এবং সংরক্ষিত ভ্রমণের পরিকল্পনা।" : "Your TourismuBD account and saved trip plans."} /><DashboardFollowerCount userId={user.id} /></div><div className="dashboard-post-action"><button type="button" className="button secondary create-post-button dashboard-order-btn" onClick={onOpenOrders} title={lang === "bn" ? "আমার অর্ডারসমূহ" : "My orders"}><ShoppingBag size={17} /><span>{lang === "bn" ? "আমার অর্ডার" : "My order"}</span>{totalCount ? <span className="owner-menu-booking-count">{toBengaliNumber(totalCount)}</span> : null}</button><PostPublisher user={user} notify={notify} onPublished={() => setPostVersion((version) => version + 1)} /></div></div>
+    <div className="page-title dashboard-title"><ProfileAvatar user={user} profile={profile} notify={notify} onSaved={(nextProfile) => setState((current) => ({ ...current, profile: nextProfile }))} /><div><p className="eyebrow">{lang === "bn" ? "হ্যালো," : "Hello,"}</p><h1 className="dashboard-greeting">{profile.full_name || (lang === "bn" ? "ভ্রমণকারী" : "traveler")}</h1><ProfileBio profile={profile} fallback={lang === "bn" ? "আপনার TourismuBD অ্যাকাউন্ট এবং সংরক্ষিত ভ্রমণের পরিকল্পনা।" : "Your TourismuBD account and saved trip plans."} /><DashboardFollowerCount userId={user.id} /></div><div className="dashboard-post-action"><button type="button" className="button secondary create-post-button dashboard-order-btn" onClick={() => { markOrdersSeen(); onOpenOrders?.(); }} title={lang === "bn" ? "আমার অর্ডারসমূহ" : "My orders"}><ShoppingBag size={17} /><span>{lang === "bn" ? "আমার অর্ডার" : "My order"}</span>{unseenCount ? <span className="owner-menu-booking-count">{toBengaliNumber(unseenCount)}</span> : null}</button><PostPublisher user={user} notify={notify} onPublished={() => setPostVersion((version) => version + 1)} /></div></div>
     <section className="provider-dashboard-panel" aria-label={lang === "bn" ? "ভ্রমণকারী অ্যাকাউন্টের বিবরণ" : "Traveler account details"}>
       <div><span>{lang === "bn" ? "সংরক্ষিত ভ্রমণ পরিকল্পনা" : "Saved itineraries"}</span><b>{toBengaliNumber(tripCount)}</b></div>
-      <div><span>{lang === "bn" ? "আমার অর্ডারসমূহ" : "My orders"}</span><b><button type="button" className="link-button" onClick={onOpenOrders} style={{ fontWeight: 700, color: "var(--river-dark)" }}>{toBengaliNumber(totalCount)} {lang === "bn" ? "টি আইটেম" : "items"}</button></b></div>
+      <div><span>{lang === "bn" ? "আমার অর্ডারসমূহ" : "My orders"}</span><b><button type="button" className="link-button" onClick={() => { markOrdersSeen(); onOpenOrders?.(); }} style={{ fontWeight: 700, color: "var(--river-dark)" }}>{toBengaliNumber(totalCount)} {lang === "bn" ? "টি আইটেম" : "items"}</button></b></div>
     </section>
     <ProfilePhotoGallery user={user} profile={profile} notify={notify} onSaved={(nextProfile) => setState((current) => ({ ...current, profile: nextProfile }))} />
     <DashboardPosts user={user} profile={profile} refreshKey={postVersion} notify={notify} />
@@ -1829,7 +1865,7 @@ function BusinessDashboard({ user, notify, onOpenOrders }) {
   const { lang, toBengaliNumber } = useLanguage();
   const [state, setState] = useState({ loading: true, profile: null, business: null, error: "" });
   const [postVersion, setPostVersion] = useState(0);
-  const { totalCount } = useUserOrders(user);
+  const { totalCount, unseenCount, markOrdersSeen } = useUserOrders(user);
   const fallbackProfile = { full_name: user.user_metadata?.full_name || "", email: user.email, phone: user.user_metadata?.phone || "", phone_visible: false, ...PROFILE_DETAILS_DEFAULTS };
 
   useEffect(() => {
@@ -1848,10 +1884,10 @@ function BusinessDashboard({ user, notify, onOpenOrders }) {
 
   const { profile, business } = state;
   return <main className="page-shell page-top provider-dashboard business-profile-dashboard">
-    <div className="page-title dashboard-title"><ProfileAvatar user={user} profile={profile} notify={notify} onSaved={(nextProfile) => setState((current) => ({ ...current, profile: nextProfile }))} /><div><p className="eyebrow">{lang === "bn" ? "হ্যালো," : "Hello,"}</p><h1 className="dashboard-greeting">{profile.full_name || (lang === "bn" ? "উদ্যোক্তা" : "business owner")}</h1><ProfileBio profile={profile} fallback={lang === "bn" ? "অ্যাকাউন্ট সেটিংসে আপনার পরিচিতি যোগ করুন।" : "Add your bio in account settings."} /><DashboardFollowerCount userId={user.id} /></div><div className="dashboard-post-action"><button type="button" className="button secondary create-post-button dashboard-order-btn" onClick={onOpenOrders} title={lang === "bn" ? "আমার অর্ডারসমূহ" : "My orders"}><ShoppingBag size={17} /><span>{lang === "bn" ? "আমার অর্ডার" : "My order"}</span>{totalCount ? <span className="owner-menu-booking-count">{toBengaliNumber(totalCount)}</span> : null}</button><PostPublisher user={user} notify={notify} businessPost onPublished={() => setPostVersion((version) => version + 1)} /></div></div>
+    <div className="page-title dashboard-title"><ProfileAvatar user={user} profile={profile} notify={notify} onSaved={(nextProfile) => setState((current) => ({ ...current, profile: nextProfile }))} /><div><p className="eyebrow">{lang === "bn" ? "হ্যালো," : "Hello,"}</p><h1 className="dashboard-greeting">{profile.full_name || (lang === "bn" ? "উদ্যোক্তা" : "business owner")}</h1><ProfileBio profile={profile} fallback={lang === "bn" ? "অ্যাকাউন্ট সেটিংসে আপনার পরিচিতি যোগ করুন।" : "Add your bio in account settings."} /><DashboardFollowerCount userId={user.id} /></div><div className="dashboard-post-action"><button type="button" className="button secondary create-post-button dashboard-order-btn" onClick={() => { markOrdersSeen(); onOpenOrders?.(); }} title={lang === "bn" ? "আমার অর্ডারসমূহ" : "My orders"}><ShoppingBag size={17} /><span>{lang === "bn" ? "আমার অর্ডার" : "My order"}</span>{unseenCount ? <span className="owner-menu-booking-count">{toBengaliNumber(unseenCount)}</span> : null}</button><PostPublisher user={user} notify={notify} businessPost onPublished={() => setPostVersion((version) => version + 1)} /></div></div>
     <section className="provider-dashboard-panel" aria-label={lang === "bn" ? "উদ্যোক্তা অ্যাকাউন্টের বিবরণ" : "Business account details"}>
       <div><span>{lang === "bn" ? "ব্যবসা / উদ্যোগ" : "Business"}</span><b>{business?.business_name || (lang === "bn" ? "উদ্যোক্তা অ্যাকাউন্ট" : "Business account")}</b></div>
-      <div><span>{lang === "bn" ? "আমার অর্ডারসমূহ" : "My orders"}</span><b><button type="button" className="link-button" onClick={onOpenOrders} style={{ fontWeight: 700, color: "var(--river-dark)" }}>{toBengaliNumber(totalCount)} {lang === "bn" ? "টি আইটেম" : "items"}</button></b></div>
+      <div><span>{lang === "bn" ? "আমার অর্ডারসমূহ" : "My orders"}</span><b><button type="button" className="link-button" onClick={() => { markOrdersSeen(); onOpenOrders?.(); }} style={{ fontWeight: 700, color: "var(--river-dark)" }}>{toBengaliNumber(totalCount)} {lang === "bn" ? "টি আইটেম" : "items"}</button></b></div>
     </section>
     <ProfilePhotoGallery user={user} profile={profile} notify={notify} onSaved={(nextProfile) => setState((current) => ({ ...current, profile: nextProfile }))} />
     <DashboardPosts user={user} profile={profile} refreshKey={postVersion} notify={notify} />

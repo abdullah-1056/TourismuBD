@@ -3,6 +3,8 @@ import {
   AlertTriangle,
   Archive,
   ArrowDown,
+  ArrowLeft,
+  ArrowRight,
   ArrowUp,
   BadgeCheck,
   BookOpenCheck,
@@ -1630,7 +1632,7 @@ const MEDIA_TABS = [
   { id: "products", label: "Business & Products", icon: Package },
 ];
 
-function MediaEditorDialog({ item, onClose, onSaved }) {
+function MediaEditorDialog({ item, onClose, onSaved, onNavigatePlace }) {
   const dialogRef = useRef(null);
   const [imageUrl, setImageUrl] = useState(item.imageUrl || item.image || item.image_url || "");
   const [captionBn, setCaptionBn] = useState(item.captionBn || "");
@@ -1641,11 +1643,20 @@ function MediaEditorDialog({ item, onClose, onSaved }) {
   const [error, setError] = useState("");
 
   useEffect(() => {
+    setImageUrl(item.imageUrl || item.image || item.image_url || "");
+    setCaptionBn(item.captionBn || "");
+    setCaptionEn(item.captionEn || "");
+    setTagBn(item.tagBn || "");
+    setTagEn(item.tagEn || "");
+    setError("");
+  }, [item]);
+
+  useEffect(() => {
     dialogRef.current?.showModal();
   }, []);
 
   const handleSave = async (e) => {
-    e.preventDefault();
+    e?.preventDefault?.();
     if (!imageUrl.trim()) {
       setError("Please provide an image either by uploading or pasting a URL.");
       return;
@@ -1668,13 +1679,45 @@ function MediaEditorDialog({ item, onClose, onSaved }) {
     }
   };
 
+  const handleSaveAndNext = async (e) => {
+    e?.preventDefault?.();
+    if (!imageUrl.trim()) {
+      setError("Please provide an image either by uploading or pasting a URL.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      await onSaved({
+        ...item,
+        imageUrl: imageUrl.trim(),
+        captionBn,
+        captionEn,
+        tagBn,
+        tagEn,
+      });
+      setSaving(false);
+      if (item.hasNext && onNavigatePlace) {
+        onNavigatePlace(item.currentIndex + 1);
+      } else {
+        onClose();
+      }
+    } catch (err) {
+      setError(err?.message || "Failed to save image changes.");
+      setSaving(false);
+    }
+  };
+
   return (
     <dialog ref={dialogRef} className="ops-dialog ops-media-dialog" onCancel={onClose}>
       <form onSubmit={handleSave} className="ops-editor">
         <button type="button" className="ops-icon-button ops-close" onClick={onClose} aria-label="Close dialog">
           <X />
         </button>
-        <p className="ops-kicker">Media management · {item.typeLabel || "Picture"}</p>
+        <p className="ops-kicker">
+          Media management · {item.typeLabel || "Picture"}
+          {item.totalInDistrict ? ` · ${item.currentIndex + 1} of ${item.totalInDistrict} in ${item.districtName}` : ""}
+        </p>
         <h2>{item.title || "Update picture"}</h2>
         {item.subtitle ? <p className="ops-media-dialog-subtitle">{item.subtitle}</p> : null}
 
@@ -1729,13 +1772,46 @@ function MediaEditorDialog({ item, onClose, onSaved }) {
 
         {error ? <p className="ops-error" role="alert">{error}</p> : null}
 
-        <div className="ops-dialog-actions">
-          <button type="button" className="ops-button secondary" onClick={onClose}>
-            Cancel
-          </button>
-          <button type="submit" className="ops-button" disabled={saving}>
-            <Pencil /> {saving ? "Saving..." : "Save changes"}
-          </button>
+        <div className="ops-dialog-actions" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", gap: "10px", marginTop: "1rem" }}>
+          <div style={{ display: "flex", gap: "8px" }}>
+            <button type="button" className="ops-button secondary" onClick={onClose}>
+              Cancel
+            </button>
+            {item.hasPrev && onNavigatePlace ? (
+              <button
+                type="button"
+                className="ops-button secondary"
+                disabled={saving}
+                onClick={() => onNavigatePlace(item.currentIndex - 1)}
+                title={item.prevPlaceName ? `Previous: ${item.prevPlaceName}` : "Previous destination"}
+              >
+                <ArrowLeft size={14} /> Prev
+              </button>
+            ) : null}
+          </div>
+
+          <div style={{ display: "flex", gap: "8px" }}>
+            {item.hasNext && onNavigatePlace ? (
+              <>
+                <button type="submit" className="ops-button secondary" disabled={saving}>
+                  <Check size={14} /> {saving ? "Saving..." : "Save"}
+                </button>
+                <button
+                  type="button"
+                  className="ops-button"
+                  disabled={saving}
+                  onClick={handleSaveAndNext}
+                  title={`Save and proceed to: ${item.nextPlaceName}`}
+                >
+                  <Check size={14} /> {saving ? "Saving..." : "Save & Next"} <ArrowRight size={14} />
+                </button>
+              </>
+            ) : (
+              <button type="submit" className="ops-button" disabled={saving}>
+                <Pencil size={14} /> {saving ? "Saving..." : "Save changes"}
+              </button>
+            )}
+          </div>
         </div>
       </form>
     </dialog>
@@ -1752,30 +1828,103 @@ function getPlaceCoverImage(p) {
   return gallery[0]?.url || p.image_url || p.image || "/images/sylhet-waterway.png";
 }
 
+function createDistrictLookup(districtList) {
+  const byId = new Map();
+  const bySlug = new Map();
+  const byName = new Map();
+  (districtList || []).forEach((d) => {
+    if (d.id) byId.set(String(d.id).toLowerCase(), d);
+    if (d.slug) bySlug.set(String(d.slug).toLowerCase(), d);
+    if (d.name) byName.set(String(d.name).toLowerCase(), d);
+  });
+  const resolve = (val) => {
+    if (!val) return null;
+    const str = String(val).toLowerCase().trim();
+    return byId.get(str) || bySlug.get(str) || byName.get(str) || null;
+  };
+  return { byId, bySlug, byName, resolve };
+}
+
+function getPaginationRange(currentPage, totalPages, maxVisible = 7) {
+  if (totalPages <= maxVisible) {
+    return Array.from({ length: totalPages }, (_, i) => i + 1);
+  }
+  const pages = [];
+  let start = Math.max(2, currentPage - 2);
+  let end = Math.min(totalPages - 1, currentPage + 2);
+
+  if (currentPage <= 3) {
+    end = 5;
+  }
+  if (currentPage >= totalPages - 2) {
+    start = totalPages - 4;
+  }
+
+  pages.push(1);
+  if (start > 2) pages.push("...");
+  for (let i = start; i <= end; i++) pages.push(i);
+  if (end < totalPages - 1) pages.push("...");
+  pages.push(totalPages);
+  return pages;
+}
+
 function MediaManager({ bypassAuth = false, onNotice, readOnly = false }) {
   const [activeTab, setActiveTab] = useState("places");
   const [searchQuery, setSearchQuery] = useState("");
-  const [places, setPlaces] = useState(() =>
-    staticPlaces.map((p) => ({
-      id: p.id,
-      name: p.name,
-      slug: p.slug,
-      category: p.category,
-      district_id: p.districtId || p.district,
-      image_url: getPlaceCoverImage(p),
-      status: p.status || "PUBLISHED",
-    }))
-  );
-  const [waterBodies, setWaterBodies] = useState(() =>
-    (staticWaterListings || []).map((w, idx) => ({
-      id: w.id || `wb-${idx}`,
-      name: w.name,
-      type: w.type || "Water body",
-      district: w.district || "",
-      image_url: w.image || "/images/gallery/water-1.jpg",
-      status: "PUBLISHED",
-    }))
-  );
+  const [districts, setDistricts] = useState(staticDistricts);
+  const [selectedDivision, setSelectedDivision] = useState("");
+  const [selectedDistrict, setSelectedDistrict] = useState("");
+  const [placePage, setPlacePage] = useState(1);
+  const [waterPage, setWaterPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(6); // Default: 6 rows (36 items)
+  const itemsPerRow = 6;
+  const pageSize = rowsPerPage >= 9999 ? 999999 : rowsPerPage * itemsPerRow;
+
+  const districtLookup = useMemo(() => createDistrictLookup(districts), [districts]);
+
+  useEffect(() => {
+    setPlacePage(1);
+    setWaterPage(1);
+  }, [selectedDistrict, selectedDivision, searchQuery]);
+
+  const [places, setPlaces] = useState(() => {
+    const lookup = createDistrictLookup(staticDistricts);
+    return staticPlaces.map((p) => {
+      const rawDist = p.districtId || p.district;
+      const dObj = lookup.resolve(rawDist);
+      return {
+        id: p.id,
+        name: p.name,
+        slug: p.slug,
+        category: p.category,
+        district_id: rawDist,
+        district_name: dObj?.name || p.district || "Bangladesh",
+        district_slug: dObj?.slug || (typeof rawDist === "string" ? rawDist.toLowerCase() : ""),
+        division_name: dObj?.division || "",
+        image_url: getPlaceCoverImage(p),
+        status: p.status || "PUBLISHED",
+      };
+    });
+  });
+
+  const [waterBodies, setWaterBodies] = useState(() => {
+    const lookup = createDistrictLookup(staticDistricts);
+    return (staticWaterListings || []).map((w, idx) => {
+      const dObj = lookup.resolve(w.district);
+      return {
+        id: w.id || `wb-${idx}`,
+        name: w.name,
+        type: w.type || "Water body",
+        district: w.district || "",
+        district_name: dObj?.name || w.district || "Bangladesh",
+        district_slug: dObj?.slug || "",
+        division_name: dObj?.division || "",
+        image_url: w.image || "/images/gallery/water-1.jpg",
+        status: "PUBLISHED",
+      };
+    });
+  });
+
   const [products, setProducts] = useState([]);
   const [banners, setBanners] = useState(() =>
     DEFAULT_BANNERS.map((b) => ({
@@ -1787,51 +1936,153 @@ function MediaManager({ bypassAuth = false, onNotice, readOnly = false }) {
   const [selectedGallerySlug, setSelectedGallerySlug] = useState("achranga-dighi");
   const [editingItem, setEditingItem] = useState(null);
 
+  const divisionOptions = useMemo(() => {
+    const set = new Set();
+    districts.forEach((d) => {
+      if (d.division) set.add(d.division);
+    });
+    return Array.from(set).sort();
+  }, [districts]);
+
+  const districtOptions = useMemo(() => {
+    return [...districts].sort((a, b) => a.name.localeCompare(b.name));
+  }, [districts]);
+
+  const districtOptionsByDivision = useMemo(() => {
+    const map = {};
+    divisionOptions.forEach((div) => {
+      map[div] = [];
+    });
+    districtOptions.forEach((d) => {
+      if (d.division) {
+        if (!map[d.division]) map[d.division] = [];
+        map[d.division].push(d);
+      }
+    });
+    return map;
+  }, [divisionOptions, districtOptions]);
+
+  const filteredDistrictOptions = useMemo(() => {
+    if (!selectedDivision) return districtOptions;
+    return districtOptions.filter(
+      (d) => d.division?.toLowerCase() === selectedDivision.toLowerCase()
+    );
+  }, [districtOptions, selectedDivision]);
+
+  const selectedDistrictObj = useMemo(() => {
+    if (!selectedDistrict) return null;
+    return districtLookup.resolve(selectedDistrict);
+  }, [selectedDistrict, districtLookup]);
+
+  const selectedDistrictName = selectedDistrictObj?.name || "";
+
+  const getPlaceCountForDistrict = useCallback(
+    (district) => {
+      if (!district) return 0;
+      return places.filter((p) => {
+        const dObj =
+          districtLookup.resolve(p.district_id) ||
+          districtLookup.resolve(p.district_slug) ||
+          districtLookup.resolve(p.district_name);
+        return (
+          dObj?.id === district.id ||
+          dObj?.slug === district.slug ||
+          (p.district_name && p.district_name.toLowerCase() === district.name.toLowerCase()) ||
+          (p.district_id && String(p.district_id).toLowerCase() === String(district.id).toLowerCase())
+        );
+      }).length;
+    },
+    [places, districtLookup]
+  );
+
   const loadAllMedia = useCallback(async () => {
     try {
       await syncCustomMediaFromServer();
     } catch {}
 
-    // 1. Load Places
+    // 1. Load Districts
+    let loadedDistricts = staticDistricts;
+    if (!bypassAuth && supabase) {
+      try {
+        const { data: dData, error: dErr } = await supabase
+          .from("districts")
+          .select("id, name, division, slug, status")
+          .order("name");
+        if (!dErr && dData?.length) {
+          loadedDistricts = dData;
+        }
+      } catch {}
+    }
+    setDistricts(loadedDistricts);
+    const lookup = createDistrictLookup(loadedDistricts);
+
+    // 2. Load Places
     try {
       let loadedPlaces = [];
       if (!bypassAuth && supabase) {
         const { data, error } = await supabase
           .from("places")
-          .select("id, name, slug, category, district_id, image_url, status")
+          .select("id, name, slug, category, district_id, image_url, status, districts(id, name, division, slug)")
           .order("name");
         if (!error && data?.length) {
-          loadedPlaces = data.map((p) => ({
-            ...p,
-            image_url: getPlaceCoverImage(p),
-          }));
+          loadedPlaces = data.map((p) => {
+            const dObj = lookup.resolve(p.district_id) || p.districts;
+            return {
+              id: p.id,
+              name: p.name,
+              slug: p.slug,
+              category: p.category,
+              district_id: p.district_id,
+              district_name: dObj?.name || p.districts?.name || "Bangladesh",
+              district_slug: dObj?.slug || p.districts?.slug || "",
+              division_name: dObj?.division || p.districts?.division || "",
+              image_url: getPlaceCoverImage(p),
+              status: p.status || "PUBLISHED",
+            };
+          });
         }
       }
       if (!loadedPlaces.length) {
-        loadedPlaces = staticPlaces.map((p) => ({
-          id: p.id,
-          name: p.name,
-          slug: p.slug,
-          category: p.category,
-          district_id: p.districtId || p.district,
-          image_url: getPlaceCoverImage(p),
-          status: p.status || "PUBLISHED",
-        }));
+        loadedPlaces = staticPlaces.map((p) => {
+          const rawDist = p.districtId || p.district;
+          const dObj = lookup.resolve(rawDist);
+          return {
+            id: p.id,
+            name: p.name,
+            slug: p.slug,
+            category: p.category,
+            district_id: rawDist,
+            district_name: dObj?.name || p.district || "Bangladesh",
+            district_slug: dObj?.slug || (typeof rawDist === "string" ? rawDist.toLowerCase() : ""),
+            division_name: dObj?.division || "",
+            image_url: getPlaceCoverImage(p),
+            status: p.status || "PUBLISHED",
+          };
+        });
       }
       setPlaces(loadedPlaces);
     } catch {
-      setPlaces(staticPlaces.map((p) => ({
-        id: p.id,
-        name: p.name,
-        slug: p.slug,
-        category: p.category,
-        district_id: p.districtId || p.district,
-        image_url: getPlaceCoverImage(p),
-        status: p.status || "PUBLISHED",
-      })));
+      setPlaces(
+        staticPlaces.map((p) => {
+          const rawDist = p.districtId || p.district;
+          const dObj = lookup.resolve(rawDist);
+          return {
+            id: p.id,
+            name: p.name,
+            slug: p.slug,
+            category: p.category,
+            district_id: rawDist,
+            district_name: dObj?.name || p.district || "Bangladesh",
+            district_slug: dObj?.slug || (typeof rawDist === "string" ? rawDist.toLowerCase() : ""),
+            division_name: dObj?.division || "",
+            image_url: getPlaceCoverImage(p),
+            status: p.status || "PUBLISHED",
+          };
+        })
+      );
     }
 
-    // 2. Load Water Bodies
+    // 3. Load Water Bodies
     try {
       let loadedWater = [];
       if (!bypassAuth && supabase) {
@@ -1840,25 +2091,39 @@ function MediaManager({ bypassAuth = false, onNotice, readOnly = false }) {
           .select("id, name, type, district, image_url, status")
           .order("name");
         if (!error && data?.length) {
-          loadedWater = data;
+          loadedWater = data.map((w) => {
+            const dObj = lookup.resolve(w.district);
+            return {
+              ...w,
+              district_name: dObj?.name || w.district || "Bangladesh",
+              district_slug: dObj?.slug || "",
+              division_name: dObj?.division || "",
+            };
+          });
         }
       }
       if (!loadedWater.length) {
-        loadedWater = (staticWaterListings || []).map((w, idx) => ({
-          id: w.id || `wb-${idx}`,
-          name: w.name,
-          type: w.type || "Water body",
-          district: w.district || "",
-          image_url: w.image || "/images/gallery/water-1.jpg",
-          status: "PUBLISHED",
-        }));
+        loadedWater = (staticWaterListings || []).map((w, idx) => {
+          const dObj = lookup.resolve(w.district);
+          return {
+            id: w.id || `wb-${idx}`,
+            name: w.name,
+            type: w.type || "Water body",
+            district: w.district || "",
+            district_name: dObj?.name || w.district || "Bangladesh",
+            district_slug: dObj?.slug || "",
+            division_name: dObj?.division || "",
+            image_url: w.image || "/images/gallery/water-1.jpg",
+            status: "PUBLISHED",
+          };
+        });
       }
       setWaterBodies(loadedWater);
     } catch {
       setWaterBodies([]);
     }
 
-    // 3. Load Products
+    // 4. Load Products
     try {
       if (!bypassAuth && supabase) {
         const { data } = await supabase
@@ -1871,7 +2136,7 @@ function MediaManager({ bypassAuth = false, onNotice, readOnly = false }) {
       setProducts([]);
     }
 
-    // 4. Load Banners
+    // 5. Load Banners
     const bannerItems = DEFAULT_BANNERS.map((b) => ({
       ...b,
       imageUrl: getSystemBanner(b.id, b.defaultUrl),
@@ -1885,36 +2150,136 @@ function MediaManager({ bypassAuth = false, onNotice, readOnly = false }) {
     loadAllMedia();
   }, [loadAllMedia]);
 
+  const filteredPlaces = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
+    return places.filter((p) => {
+      if (selectedDivision) {
+        const pDiv = p.division_name || districtLookup.resolve(p.district_id)?.division || "";
+        if (pDiv.toLowerCase() !== selectedDivision.toLowerCase()) return false;
+      }
+      if (selectedDistrictObj) {
+        const dObj =
+          districtLookup.resolve(p.district_id) ||
+          districtLookup.resolve(p.district_slug) ||
+          districtLookup.resolve(p.district_name);
+        const matches =
+          dObj?.id === selectedDistrictObj.id ||
+          dObj?.slug === selectedDistrictObj.slug ||
+          (p.district_name && p.district_name.toLowerCase() === selectedDistrictObj.name.toLowerCase()) ||
+          (p.district_id && String(p.district_id).toLowerCase() === String(selectedDistrictObj.id).toLowerCase());
+        if (!matches) return false;
+      }
+      if (q) {
+        const match =
+          p.name?.toLowerCase().includes(q) ||
+          p.category?.toLowerCase().includes(q) ||
+          p.district_name?.toLowerCase().includes(q) ||
+          p.district_id?.toLowerCase().includes(q);
+        if (!match) return false;
+      }
+      return true;
+    });
+  }, [places, selectedDivision, selectedDistrictObj, districtLookup, searchQuery]);
+
   const selectedPlace = useMemo(() => {
-    return places.find((p) => p.slug === selectedGallerySlug || p.id === selectedGallerySlug) || places[0];
-  }, [places, selectedGallerySlug]);
+    const candidateList = selectedDistrict ? filteredPlaces : places;
+    if (!candidateList.length) return places[0];
+    return (
+      candidateList.find((p) => p.slug === selectedGallerySlug || p.id === selectedGallerySlug) ||
+      candidateList[0]
+    );
+  }, [places, filteredPlaces, selectedDistrict, selectedGallerySlug]);
 
   const currentGallery = useMemo(() => {
     if (!selectedPlace) return [];
     return getPlaceGallery(selectedPlace);
   }, [selectedPlace]);
 
-  const filteredPlaces = useMemo(() => {
-    const q = searchQuery.toLowerCase().trim();
-    if (!q) return places;
-    return places.filter(
-      (p) =>
-        p.name?.toLowerCase().includes(q) ||
-        p.category?.toLowerCase().includes(q) ||
-        p.district_id?.toLowerCase().includes(q)
-    );
-  }, [places, searchQuery]);
-
   const filteredWater = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
-    if (!q) return waterBodies;
-    return waterBodies.filter(
-      (w) =>
-        w.name?.toLowerCase().includes(q) ||
-        w.type?.toLowerCase().includes(q) ||
-        w.district?.toLowerCase().includes(q)
-    );
-  }, [waterBodies, searchQuery]);
+    return waterBodies.filter((w) => {
+      if (selectedDivision) {
+        const wDiv = w.division_name || districtLookup.resolve(w.district)?.division || "";
+        if (wDiv.toLowerCase() !== selectedDivision.toLowerCase()) return false;
+      }
+      if (selectedDistrictObj) {
+        const dObj =
+          districtLookup.resolve(w.district) ||
+          districtLookup.resolve(w.district_name) ||
+          districtLookup.resolve(w.district_slug);
+        const matches =
+          dObj?.id === selectedDistrictObj.id ||
+          dObj?.slug === selectedDistrictObj.slug ||
+          (w.district_name && w.district_name.toLowerCase() === selectedDistrictObj.name.toLowerCase()) ||
+          (w.district && w.district.toLowerCase() === selectedDistrictObj.name.toLowerCase());
+        if (!matches) return false;
+      }
+      if (q) {
+        const match =
+          w.name?.toLowerCase().includes(q) ||
+          w.type?.toLowerCase().includes(q) ||
+          w.district?.toLowerCase().includes(q) ||
+          w.district_name?.toLowerCase().includes(q);
+        if (!match) return false;
+      }
+      return true;
+    });
+  }, [waterBodies, selectedDivision, selectedDistrictObj, districtLookup, searchQuery]);
+
+  const totalPlaceItems = filteredPlaces.length;
+  const totalPlacePages = Math.max(1, Math.ceil(totalPlaceItems / pageSize));
+  const safePlacePage = Math.min(placePage, totalPlacePages);
+  const placeStartIdx = (safePlacePage - 1) * pageSize;
+  const placeEndIdx = Math.min(placeStartIdx + pageSize, totalPlaceItems);
+  const pagedPlaces = useMemo(() => {
+    return filteredPlaces.slice(placeStartIdx, placeEndIdx);
+  }, [filteredPlaces, placeStartIdx, placeEndIdx]);
+  const placePageNumbers = useMemo(() => {
+    return getPaginationRange(safePlacePage, totalPlacePages);
+  }, [safePlacePage, totalPlacePages]);
+
+  const totalWaterItems = filteredWater.length;
+  const totalWaterPages = Math.max(1, Math.ceil(totalWaterItems / pageSize));
+  const safeWaterPage = Math.min(waterPage, totalWaterPages);
+  const waterStartIdx = (safeWaterPage - 1) * pageSize;
+  const waterEndIdx = Math.min(waterStartIdx + pageSize, totalWaterItems);
+  const pagedWater = useMemo(() => {
+    return filteredWater.slice(waterStartIdx, waterEndIdx);
+  }, [filteredWater, waterStartIdx, waterEndIdx]);
+  const waterPageNumbers = useMemo(() => {
+    return getPaginationRange(safeWaterPage, totalWaterPages);
+  }, [safeWaterPage, totalWaterPages]);
+
+  const openPlaceEditorAtIndex = useCallback(
+    (index, placesList = filteredPlaces) => {
+      if (!placesList || index < 0 || index >= placesList.length) return;
+      const place = placesList[index];
+      const gallery = getPlaceGallery(place);
+      const imgUrl = getPlaceCoverImage(place);
+      const distName = place.district_name || districtLookup.resolve(place.district_id)?.name || "Bangladesh";
+
+      setEditingItem({
+        id: place.id,
+        slug: place.slug,
+        title: place.name,
+        subtitle: `${distName} · ${place.category || "Scenic spot"}`,
+        typeLabel: "Destination Cover Picture",
+        imageUrl: imgUrl,
+        fallbackUrl: gallery[0]?.fallbackUrl || "/images/sylhet-waterway.png",
+        isPlaceCover: true,
+        currentIndex: index,
+        totalPlaces: placesList.length,
+        totalInDistrict: placesList.length,
+        districtPlaces: placesList,
+        districtName: distName,
+        hasNext: index < placesList.length - 1,
+        hasPrev: index > 0,
+        nextPlaceName: index < placesList.length - 1 ? placesList[index + 1]?.name : null,
+        prevPlaceName: index > 0 ? placesList[index - 1]?.name : null,
+      });
+    },
+    [filteredPlaces, districtLookup]
+  );
 
   const handleItemSaved = async (savedItem) => {
     if (savedItem.isPlaceCover) {
@@ -1952,6 +2317,11 @@ function MediaManager({ bypassAuth = false, onNotice, readOnly = false }) {
       setPlaces((prev) =>
         prev.map((p) => (p.id === savedItem.id || p.slug === savedItem.slug ? { ...p, image_url: newUrl } : p))
       );
+      if (editingItem?.districtPlaces) {
+        editingItem.districtPlaces = editingItem.districtPlaces.map((p) =>
+          p.id === savedItem.id || p.slug === savedItem.slug ? { ...p, image_url: newUrl } : p
+        );
+      }
       onNotice?.("Place cover picture updated successfully.");
     } else if (savedItem.isGalleryPhoto) {
       if (!selectedPlace) return;
@@ -2068,29 +2438,112 @@ function MediaManager({ bypassAuth = false, onNotice, readOnly = false }) {
           })}
         </div>
 
-        <div className="ops-media-search-wrap">
-          {activeTab !== "banners" ? (
-            <label className="ops-media-search">
-              <Search size={15} />
-              <input
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder={
-                  activeTab === "galleries"
-                    ? "Select or search destination..."
-                    : `Search ${activeTab}...`
-                }
-              />
-            </label>
+        <div className="ops-media-filters-wrap">
+          {["places", "galleries", "water"].includes(activeTab) ? (
+            <div className="ops-media-district-filters">
+              <label className="ops-media-filter-label">
+                <MapPin size={14} />
+                <select
+                  aria-label="Filter by division"
+                  value={selectedDivision}
+                  onChange={(e) => {
+                    setSelectedDivision(e.target.value);
+                    setSelectedDistrict("");
+                  }}
+                  className="ops-media-select"
+                >
+                  <option value="">All Divisions</option>
+                  {divisionOptions.map((div) => (
+                    <option key={div} value={div}>
+                      {div} Division
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <select
+                aria-label="Choose district"
+                value={selectedDistrict}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSelectedDistrict(val);
+                  if (val) {
+                    const d = districtLookup.resolve(val);
+                    if (d?.division && (!selectedDivision || selectedDivision !== d.division)) {
+                      setSelectedDivision(d.division);
+                    }
+                  }
+                }}
+                className="ops-media-select ops-media-district-select"
+              >
+                <option value="">
+                  {selectedDivision
+                    ? `All Districts in ${selectedDivision} (${filteredDistrictOptions.length})`
+                    : `Choose District (64 Districts)`}
+                </option>
+                {selectedDivision ? (
+                  filteredDistrictOptions.map((d) => (
+                    <option key={d.id || d.slug} value={d.id || d.slug}>
+                      {d.name} ({getPlaceCountForDistrict(d)} places)
+                    </option>
+                  ))
+                ) : (
+                  divisionOptions.map((div) => {
+                    const inDiv = districtOptionsByDivision[div] || [];
+                    if (!inDiv.length) return null;
+                    return (
+                      <optgroup key={div} label={`${div} Division`}>
+                        {inDiv.map((d) => (
+                          <option key={d.id || d.slug} value={d.id || d.slug}>
+                            {d.name} ({getPlaceCountForDistrict(d)} places)
+                          </option>
+                        ))}
+                      </optgroup>
+                    );
+                  })
+                )}
+              </select>
+
+              {(selectedDistrict || selectedDivision) ? (
+                <button
+                  type="button"
+                  className="ops-media-clear-btn"
+                  onClick={() => {
+                    setSelectedDistrict("");
+                    setSelectedDivision("");
+                  }}
+                  title="Clear district filter"
+                >
+                  Clear district
+                </button>
+              ) : null}
+            </div>
           ) : null}
-          <button
-            className="ops-icon-button"
-            onClick={loadAllMedia}
-            title="Refresh media"
-            aria-label="Refresh media"
-          >
-            <RefreshCw size={15} />
-          </button>
+
+          <div className="ops-media-search-wrap">
+            {activeTab !== "banners" ? (
+              <label className="ops-media-search">
+                <Search size={15} />
+                <input
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder={
+                    activeTab === "galleries"
+                      ? "Search destination in gallery..."
+                      : `Search ${activeTab}...`
+                  }
+                />
+              </label>
+            ) : null}
+            <button
+              className="ops-icon-button"
+              onClick={loadAllMedia}
+              title="Refresh media"
+              aria-label="Refresh media"
+            >
+              <RefreshCw size={15} />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -2102,16 +2555,45 @@ function MediaManager({ bypassAuth = false, onNotice, readOnly = false }) {
         <div className="ops-media-content">
           <div className="ops-media-subhead">
             <div>
-              <h3>Destination Cover Pictures</h3>
-              <p>Upload a file or paste any web/Google image URL for every tourist destination.</p>
+              <h3>
+                {selectedDistrictName
+                  ? `${selectedDistrictName} District Cover Pictures`
+                  : "Destination Cover Pictures"}
+              </h3>
+              <p>
+                {selectedDistrictName
+                  ? `Manage and update cover images for all ${filteredPlaces.length} tourist destinations in ${selectedDistrictName} district.`
+                  : "Upload a file or paste any web/Google image URL for every tourist destination."}
+              </p>
             </div>
-            <span className="ops-badge">{filteredPlaces.length} destinations</span>
+            <div className="ops-media-subhead-actions">
+              <span className="ops-badge">
+                {totalPlacePages > 1
+                  ? `Page ${safePlacePage} of ${totalPlacePages} (${totalPlaceItems} destinations)`
+                  : `${totalPlaceItems} destinations ${selectedDistrictName ? `in ${selectedDistrictName}` : ""}`}
+              </span>
+              {filteredPlaces.length > 0 ? (
+                <button
+                  type="button"
+                  className="ops-button"
+                  onClick={() => openPlaceEditorAtIndex(0, filteredPlaces)}
+                  title={`Sequentially update all ${filteredPlaces.length} destination pictures in ${selectedDistrictName || "this list"}`}
+                >
+                  <Camera size={14} /> Update All Pictures {selectedDistrictName ? `in ${selectedDistrictName}` : ""}
+                </button>
+              ) : null}
+            </div>
           </div>
 
           <div className="ops-media-grid">
-            {filteredPlaces.map((place) => {
+            {pagedPlaces.map((place, idxOnPage) => {
               const gallery = getPlaceGallery(place);
               const imgUrl = getPlaceCoverImage(place);
+              const distName =
+                place.district_name ||
+                districtLookup.resolve(place.district_id)?.name ||
+                "Bangladesh";
+              const globalIndex = placeStartIdx + idxOnPage;
               return (
                 <div key={place.id || place.slug} className="ops-media-card">
                   <div className="ops-media-card-thumb">
@@ -2127,17 +2609,7 @@ function MediaManager({ bypassAuth = false, onNotice, readOnly = false }) {
                     <button
                       type="button"
                       className="ops-media-card-action-btn"
-                      onClick={() =>
-                        setEditingItem({
-                          id: place.id,
-                          slug: place.slug,
-                          title: place.name,
-                          subtitle: `${place.district_id || ""} · ${place.category || ""}`,
-                          typeLabel: "Destination Cover Picture",
-                          imageUrl: imgUrl,
-                          isPlaceCover: true,
-                        })
-                      }
+                      onClick={() => openPlaceEditorAtIndex(globalIndex, filteredPlaces)}
                       title="Change picture"
                     >
                       <Camera size={14} /> Change Picture
@@ -2145,11 +2617,103 @@ function MediaManager({ bypassAuth = false, onNotice, readOnly = false }) {
                   </div>
                   <div className="ops-media-card-info">
                     <h4>{place.name}</h4>
-                    <p>{place.district_id || "Bangladesh"} · {place.category || "Scenic spot"}</p>
+                    <p>{distName} · {place.category || "Scenic spot"}</p>
                   </div>
                 </div>
               );
             })}
+          </div>
+
+          <div className="ops-pagination">
+            <div className="ops-pagination-info">
+              Showing <strong>{totalPlaceItems === 0 ? 0 : placeStartIdx + 1}–{placeEndIdx}</strong> of <strong>{totalPlaceItems}</strong> destinations
+              {totalPlacePages > 1 ? ` · Page ${safePlacePage} of ${totalPlacePages}` : ""}
+            </div>
+
+            {totalPlacePages > 1 ? (
+              <div className="ops-pagination-nav">
+                <button
+                  type="button"
+                  className="ops-pagination-btn"
+                  onClick={() => setPlacePage(1)}
+                  disabled={safePlacePage === 1}
+                  title="First page"
+                  aria-label="First page"
+                >
+                  <ArrowLeft size={13} /><ArrowLeft size={13} style={{ marginLeft: -8 }} />
+                </button>
+                <button
+                  type="button"
+                  className="ops-pagination-btn"
+                  onClick={() => setPlacePage((p) => Math.max(1, p - 1))}
+                  disabled={safePlacePage === 1}
+                  title="Previous page"
+                  aria-label="Previous page"
+                >
+                  <ArrowLeft size={13} /> Prev
+                </button>
+
+                <div className="ops-pagination-pages">
+                  {placePageNumbers.map((p, i) =>
+                    p === "..." ? (
+                      <span key={`ellipsis-${i}`} className="ops-pagination-ellipsis">
+                        …
+                      </span>
+                    ) : (
+                      <button
+                        key={p}
+                        type="button"
+                        className={`ops-pagination-page-btn ${p === safePlacePage ? "active" : ""}`}
+                        onClick={() => setPlacePage(p)}
+                        aria-current={p === safePlacePage ? "page" : undefined}
+                      >
+                        {p}
+                      </button>
+                    )
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  className="ops-pagination-btn"
+                  onClick={() => setPlacePage((p) => Math.min(totalPlacePages, p + 1))}
+                  disabled={safePlacePage === totalPlacePages}
+                  title="Next page"
+                  aria-label="Next page"
+                >
+                  Next <ArrowRight size={13} />
+                </button>
+                <button
+                  type="button"
+                  className="ops-pagination-btn"
+                  onClick={() => setPlacePage(totalPlacePages)}
+                  disabled={safePlacePage === totalPlacePages}
+                  title="Last page"
+                  aria-label="Last page"
+                >
+                  <ArrowRight size={13} style={{ marginRight: -8 }} /><ArrowRight size={13} />
+                </button>
+              </div>
+            ) : null}
+
+            <div className="ops-pagination-size">
+              <label>
+                <span>Per page:</span>
+                <select
+                  value={rowsPerPage}
+                  onChange={(e) => {
+                    setRowsPerPage(Number(e.target.value));
+                    setPlacePage(1);
+                  }}
+                  aria-label="Rows per page"
+                >
+                  <option value={6}>6 rows (36 destinations)</option>
+                  <option value={4}>4 rows (24 destinations)</option>
+                  <option value={8}>8 rows (48 destinations)</option>
+                  <option value={12}>12 rows (72 destinations)</option>
+                </select>
+              </label>
+            </div>
           </div>
         </div>
       ) : null}
@@ -2158,7 +2722,11 @@ function MediaManager({ bypassAuth = false, onNotice, readOnly = false }) {
         <div className="ops-media-content">
           <div className="ops-media-subhead">
             <div>
-              <h3>Scenic Photo Galleries (Silent Beauty)</h3>
+              <h3>
+                {selectedDistrictName
+                  ? `${selectedDistrictName} District Galleries (Silent Beauty)`
+                  : "Scenic Photo Galleries (Silent Beauty)"}
+              </h3>
               <p>Each destination features 6 to 9 silent beauty photos. Super Admins and Media Admins can replace, add, or reorder any photo.</p>
             </div>
             <div className="ops-place-select-wrap">
@@ -2168,11 +2736,17 @@ function MediaManager({ bypassAuth = false, onNotice, readOnly = false }) {
                 onChange={(e) => setSelectedGallerySlug(e.target.value)}
                 className="ops-gallery-place-select"
               >
-                {places.map((p) => (
-                  <option key={p.slug || p.id} value={p.slug || p.id}>
-                    {p.name} ({p.district_id || "Bangladesh"})
-                  </option>
-                ))}
+                {(selectedDistrict ? filteredPlaces : places).map((p) => {
+                  const distName =
+                    p.district_name ||
+                    districtLookup.resolve(p.district_id)?.name ||
+                    "Bangladesh";
+                  return (
+                    <option key={p.slug || p.id} value={p.slug || p.id}>
+                      {p.name} ({distName})
+                    </option>
+                  );
+                })}
               </select>
             </div>
           </div>
@@ -2289,15 +2863,28 @@ function MediaManager({ bypassAuth = false, onNotice, readOnly = false }) {
         <div className="ops-media-content">
           <div className="ops-media-subhead">
             <div>
-              <h3>Water Bodies & Rivers</h3>
+              <h3>
+                {selectedDistrictName
+                  ? `${selectedDistrictName} District Water Bodies & Rivers`
+                  : "Water Bodies & Rivers"}
+              </h3>
               <p>Pictures of rivers, haors, lakes, and waterfalls across Bangladesh.</p>
             </div>
-            <span className="ops-badge">{filteredWater.length} water bodies</span>
+            <span className="ops-badge">
+              {totalWaterPages > 1
+                ? `Page ${safeWaterPage} of ${totalWaterPages} (${totalWaterItems} water bodies)`
+                : `${totalWaterItems} water bodies ${selectedDistrictName ? `in ${selectedDistrictName}` : ""}`}
+            </span>
           </div>
 
           <div className="ops-media-grid">
-            {filteredWater.map((item) => {
+            {pagedWater.map((item) => {
               const imgUrl = item.image_url || "/images/gallery/water-1.jpg";
+              const distName =
+                item.district_name ||
+                districtLookup.resolve(item.district)?.name ||
+                item.district ||
+                "Bangladesh";
               return (
                 <div key={item.id} className="ops-media-card">
                   <div className="ops-media-card-thumb">
@@ -2317,7 +2904,7 @@ function MediaManager({ bypassAuth = false, onNotice, readOnly = false }) {
                         setEditingItem({
                           id: item.id,
                           title: item.name,
-                          subtitle: `${item.type} · ${item.district || "Bangladesh"}`,
+                          subtitle: `${item.type} · ${distName}`,
                           typeLabel: "Water Body Picture",
                           imageUrl: imgUrl,
                           isWaterBody: true,
@@ -2330,12 +2917,56 @@ function MediaManager({ bypassAuth = false, onNotice, readOnly = false }) {
                   </div>
                   <div className="ops-media-card-info">
                     <h4>{item.name}</h4>
-                    <p>{item.type} · {item.district || "Bangladesh"}</p>
+                    <p>{item.type} · {distName}</p>
                   </div>
                 </div>
               );
             })}
           </div>
+
+          {totalWaterPages > 1 ? (
+            <div className="ops-pagination">
+              <div className="ops-pagination-info">
+                Showing <strong>{totalWaterItems === 0 ? 0 : waterStartIdx + 1}–{waterEndIdx}</strong> of <strong>{totalWaterItems}</strong> water bodies
+              </div>
+              <div className="ops-pagination-nav">
+                <button
+                  type="button"
+                  className="ops-pagination-btn"
+                  onClick={() => setWaterPage((p) => Math.max(1, p - 1))}
+                  disabled={safeWaterPage === 1}
+                >
+                  <ArrowLeft size={13} /> Prev
+                </button>
+                <div className="ops-pagination-pages">
+                  {waterPageNumbers.map((p, i) =>
+                    p === "..." ? (
+                      <span key={`w-ellipsis-${i}`} className="ops-pagination-ellipsis">
+                        …
+                      </span>
+                    ) : (
+                      <button
+                        key={p}
+                        type="button"
+                        className={`ops-pagination-page-btn ${p === safeWaterPage ? "active" : ""}`}
+                        onClick={() => setWaterPage(p)}
+                      >
+                        {p}
+                      </button>
+                    )
+                  )}
+                </div>
+                <button
+                  type="button"
+                  className="ops-pagination-btn"
+                  onClick={() => setWaterPage((p) => Math.min(totalWaterPages, p + 1))}
+                  disabled={safeWaterPage === totalWaterPages}
+                >
+                  Next <ArrowRight size={13} />
+                </button>
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -2468,6 +3099,14 @@ function MediaManager({ bypassAuth = false, onNotice, readOnly = false }) {
           item={editingItem}
           onClose={() => setEditingItem(null)}
           onSaved={handleItemSaved}
+          onNavigatePlace={(newIndex) => {
+            const list = editingItem.districtPlaces || filteredPlaces;
+            const targetPage = Math.floor(newIndex / pageSize) + 1;
+            if (targetPage !== placePage && targetPage <= totalPlacePages) {
+              setPlacePage(targetPage);
+            }
+            openPlaceEditorAtIndex(newIndex, list);
+          }}
         />
       ) : null}
     </section>

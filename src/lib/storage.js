@@ -79,3 +79,29 @@ export function cancelUserOrder(orderId, userId) {
   }
   return null;
 }
+
+const SEEN_ORDERS_KEY = "tourismubd.seenOrders.v1";
+
+export function loadSeenOrderIds(userId) {
+  const key = accountKey(SEEN_ORDERS_KEY, userId);
+  if (!key || !globalThis.localStorage) return null;
+  try {
+    const raw = globalThis.localStorage.getItem(key);
+    if (raw === null) return null;
+    const list = JSON.parse(raw);
+    return new Set(Array.isArray(list) ? list : []);
+  } catch {
+    return new Set();
+  }
+}
+
+export function saveSeenOrderIds(userId, ids = []) {
+  const key = accountKey(SEEN_ORDERS_KEY, userId);
+  if (!key || !globalThis.localStorage) return;
+  try {
+    const existing = loadSeenOrderIds(userId) || new Set();
+    const list = Array.isArray(ids) ? ids : Array.from(ids || []);
+    list.forEach((id) => id && existing.add(id));
+    globalThis.localStorage.setItem(key, JSON.stringify(Array.from(existing)));
+  } catch {}
+}
