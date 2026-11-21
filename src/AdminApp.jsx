@@ -884,7 +884,7 @@ function ImageUploader({
 
       {mode === "file" ? (
         <div
-          className={`ops-dropzone ${dragActive ? "drag-active" : ""} ${uploading ? "uploading" : ""}`}
+          className={`ops-dropzone ${previewUrl ? "has-preview" : ""} ${dragActive ? "drag-active" : ""} ${uploading ? "uploading" : ""}`}
           onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
           onDragLeave={() => setDragActive(false)}
           onDrop={handleDrop}
@@ -897,11 +897,19 @@ function ImageUploader({
             accept="image/jpeg,image/png,image/webp,image/gif"
             onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
           />
-          <UploadCloud className="ops-dropzone-icon" size={26} />
-          <p className="ops-dropzone-primary">
-            {uploading ? "Uploading to storage..." : "Drag & drop an image here, or click to browse"}
-          </p>
-          <span className="ops-dropzone-hint">Supports JPG, PNG, WebP up to 10MB</span>
+          <div className="ops-dropzone-inner">
+            <UploadCloud className="ops-dropzone-icon" size={previewUrl ? 20 : 28} />
+            <p className="ops-dropzone-text">
+              {uploading ? (
+                <span>Uploading to storage...</span>
+              ) : previewUrl ? (
+                <>Drop a new image here, or <span>browse to replace</span></>
+              ) : (
+                <>Drag & drop an image here, or <span>click to browse</span></>
+              )}
+            </p>
+            <span className="ops-dropzone-hint">Supports JPG, PNG, WebP up to 10MB</span>
+          </div>
         </div>
       ) : (
         <div className="ops-url-input-wrap">
@@ -912,6 +920,7 @@ function ImageUploader({
             placeholder="https://images.unsplash.com/... or Google Image link"
             className="ops-image-url-field"
           />
+          <span className="ops-url-hint">Paste any direct web link to an image (JPG, PNG, WebP)</span>
         </div>
       )}
 
@@ -919,7 +928,7 @@ function ImageUploader({
 
       {previewUrl ? (
         <div className="ops-uploader-preview-box">
-          <div className="ops-uploader-preview-img-wrap" style={{ maxHeight: `${previewHeight}px` }}>
+          <div className="ops-uploader-preview-img-wrap" style={{ height: `${previewHeight}px` }}>
             <img
               src={previewUrl}
               alt="Preview"
@@ -928,17 +937,34 @@ function ImageUploader({
           </div>
           <div className="ops-uploader-preview-bar">
             <span className="ops-uploader-preview-label"><Check size={14} /> Image Selected</span>
-            <button
-              type="button"
-              className="ops-uploader-clear-btn"
-              onClick={() => {
-                setPreviewUrl("");
-                setUrlInput("");
-                onImageSelected?.("");
-              }}
-            >
-              Clear
-            </button>
+            <div className="ops-uploader-preview-actions">
+              <button
+                type="button"
+                className="ops-uploader-change-btn"
+                onClick={() => {
+                  if (mode === "file") {
+                    fileInputRef.current?.click();
+                  } else {
+                    const input = document.querySelector(".ops-image-url-field");
+                    input?.focus();
+                  }
+                }}
+              >
+                <RefreshCw size={12} /> Replace
+              </button>
+              <button
+                type="button"
+                className="ops-uploader-clear-btn"
+                onClick={() => {
+                  setPreviewUrl("");
+                  setUrlInput("");
+                  if (fileInputRef.current) fileInputRef.current.value = "";
+                  onImageSelected?.("");
+                }}
+              >
+                <Trash2 size={12} /> Clear
+              </button>
+            </div>
           </div>
         </div>
       ) : null}
@@ -1710,7 +1736,7 @@ function MediaEditorDialog({ item, onClose, onSaved, onNavigatePlace }) {
 
   return (
     <dialog ref={dialogRef} className="ops-dialog ops-media-dialog" onCancel={onClose}>
-      <form onSubmit={handleSave} className="ops-editor">
+      <form onSubmit={handleSave} className="ops-editor ops-media-editor">
         <button type="button" className="ops-icon-button ops-close" onClick={onClose} aria-label="Close dialog">
           <X />
         </button>
@@ -1772,7 +1798,7 @@ function MediaEditorDialog({ item, onClose, onSaved, onNavigatePlace }) {
 
         {error ? <p className="ops-error" role="alert">{error}</p> : null}
 
-        <div className="ops-dialog-actions" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", gap: "10px", marginTop: "1rem" }}>
+        <div className="ops-dialog-actions ops-media-dialog-actions">
           <div style={{ display: "flex", gap: "8px" }}>
             <button type="button" className="ops-button secondary" onClick={onClose}>
               Cancel
