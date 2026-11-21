@@ -2,6 +2,11 @@
 
 Place-first travel discovery and practical route planning for Bangladesh, starting with Sylhet District.
 
+[![Agensi Skill](https://img.shields.io/badge/Agensi%20Skill-Bangladesh%20Travel%20Planner-blue?style=for-the-badge)](https://www.agensi.io/skills/bangladesh-travel-planner)
+[![Live on Agensi](https://img.shields.io/badge/Agensi.io-Live-00C853?style=for-the-badge)](https://www.agensi.io/skills/bangladesh-travel-planner)
+
+> 🤖 **AI Agent Skill Available:** TourismuBD's route planning algorithms, verified 64-district coordinates, and boundary-safe routing rules are published as an AI agent skill on Agensi: [**Bangladesh Travel Planner on Agensi**](https://www.agensi.io/skills/bangladesh-travel-planner). Compatible with Claude Code, Cursor, GitHub Copilot, Codex CLI, and Gemini CLI.
+
 ## Run locally
 
 ```bash
